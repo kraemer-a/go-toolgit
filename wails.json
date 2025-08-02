@@ -1,0 +1,23 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "go-toolgit",
+  "outputfilename": "go-toolgit",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "GitHub Replace",
+    "email": "go-toolgit@example.com"
+  },
+  "info": {
+    "companyName": "GitHub Replace Tool",
+    "productName": "GitHub Replace",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright......",
+    "comments": "A tool to replace strings across GitHub repositories"
+  },
+  "nsisType": "multiple",
+  "obfuscated": false,
+  "garbleargs": ""
+}

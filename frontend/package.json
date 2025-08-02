@@ -1,0 +1,9 @@
+{
+  "name": "go-toolgit-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for GitHub Replace Tool",
+  "scripts": {
+    "dev": "echo 'Frontend dev mode'",
+    "build": "echo 'Frontend build complete'"
+  }
+}
