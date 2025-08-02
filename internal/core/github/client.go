@@ -49,6 +49,24 @@ type Tree struct {
 	Entries []TreeEntry
 }
 
+type CreateRepositoryOptions struct {
+	Name         string
+	Organization string
+	Private      bool
+	Description  string
+}
+
+type UpdateRepositoryOptions struct {
+	DefaultBranch string
+}
+
+type CreateWebhookOptions struct {
+	URL         string
+	ContentType string
+	Events      []string
+	Active      bool
+}
+
 func NewClient(cfg *Config) (*Client, error) {
 	ctx := context.Background()
 	ts := oauth2.StaticTokenSource(
@@ -385,4 +403,86 @@ func (c *Client) GetRepository(ctx context.Context, repoFullName string) (*githu
 	}
 
 	return repository, nil
+}
+
+// CreateRepository creates a new repository
+func (c *Client) CreateRepository(ctx context.Context, opts *CreateRepositoryOptions) (*Repository, error) {
+	repo := &github.Repository{
+		Name:        github.String(opts.Name),
+		Private:     github.Bool(opts.Private),
+		Description: github.String(opts.Description),
+	}
+
+	var createdRepo *github.Repository
+	var err error
+
+	if opts.Organization != "" {
+		createdRepo, _, err = c.client.Repositories.Create(ctx, opts.Organization, repo)
+	} else {
+		createdRepo, _, err = c.client.Repositories.Create(ctx, "", repo)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create repository: %w", err)
+	}
+
+	return &Repository{
+		ID:       createdRepo.GetID(),
+		Name:     createdRepo.GetName(),
+		FullName: createdRepo.GetFullName(),
+		CloneURL: createdRepo.GetCloneURL(),
+		SSHURL:   createdRepo.GetSSHURL(),
+		Private:  createdRepo.GetPrivate(),
+	}, nil
+}
+
+// UpdateRepository updates repository settings
+func (c *Client) UpdateRepository(ctx context.Context, owner, repo string, opts *UpdateRepositoryOptions) (*github.Repository, error) {
+	update := &github.Repository{}
+	
+	if opts.DefaultBranch != "" {
+		update.DefaultBranch = github.String(opts.DefaultBranch)
+	}
+
+	updatedRepo, _, err := c.client.Repositories.Edit(ctx, owner, repo, update)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update repository: %w", err)
+	}
+
+	return updatedRepo, nil
+}
+
+// AddTeamToRepository adds a team to a repository with specific permissions
+func (c *Client) AddTeamToRepository(ctx context.Context, org, teamSlug, repo, permission string) error {
+	_, err := c.client.Teams.AddTeamRepoBySlug(ctx, org, teamSlug, org, repo, &github.TeamAddTeamRepoOptions{
+		Permission: permission,
+	})
+	
+	if err != nil {
+		return fmt.Errorf("failed to add team %s to repository %s: %w", teamSlug, repo, err)
+	}
+
+	return nil
+}
+
+// CreateWebhook creates a webhook for a repository
+func (c *Client) CreateWebhook(ctx context.Context, owner, repo string, opts *CreateWebhookOptions) (*github.Hook, error) {
+	config := &github.HookConfig{
+		URL:         github.String(opts.URL),
+		ContentType: github.String(opts.ContentType),
+	}
+
+	hook := &github.Hook{
+		Name:   github.String("web"),
+		Config: config,
+		Events: opts.Events,
+		Active: github.Bool(opts.Active),
+	}
+
+	createdHook, _, err := c.client.Repositories.CreateHook(ctx, owner, repo, hook)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create webhook: %w", err)
+	}
+
+	return createdHook, nil
 }

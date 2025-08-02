@@ -133,6 +133,27 @@ const GetDefaultExcludePatterns = isWails ?
     } : 
     () => Promise.resolve(['node_modules/*', 'vendor/*']);
 
+// Migration functions
+const MigrateRepository = isWails ? 
+    async (config) => {
+        const app = getApp();
+        if (app && app.MigrateRepository) {
+            return await app.MigrateRepository(config);
+        }
+        return { success: true, message: 'Demo mode', steps: [] };
+    } : 
+    (config) => Promise.resolve({ success: true, message: 'Demo mode', steps: [] });
+
+const ValidateMigrationConfig = isWails ? 
+    async (config) => {
+        const app = getApp();
+        if (app && app.ValidateMigrationConfig) {
+            return await app.ValidateMigrationConfig(config);
+        }
+        return;
+    } : 
+    (config) => Promise.resolve();
+
 class GitHubBitbucketReplaceApp {
     constructor() {
         this.repositories = [];
@@ -227,6 +248,12 @@ class GitHubBitbucketReplaceApp {
         // Diff preview buttons
         document.getElementById('apply-changes-btn').addEventListener('click', this.handleApplyChanges.bind(this));
         document.getElementById('cancel-changes-btn').addEventListener('click', this.handleCancelChanges.bind(this));
+        
+        // Migration buttons
+        document.getElementById('add-team-btn').addEventListener('click', this.handleAddTeam.bind(this));
+        document.getElementById('validate-migration-btn').addEventListener('click', this.handleValidateMigration.bind(this));
+        document.getElementById('migration-dry-run-btn').addEventListener('click', () => this.handleMigration(true));
+        document.getElementById('start-migration-btn').addEventListener('click', () => this.handleMigration(false));
     }
 
     renderConfigForm() {
@@ -896,6 +923,110 @@ class GitHubBitbucketReplaceApp {
             }
         `;
         document.head.appendChild(style);
+    }
+    
+    // Migration methods
+    handleAddTeam() {
+        const container = document.getElementById('migration-teams');
+        const teamItem = document.createElement('div');
+        teamItem.className = 'team-item';
+        teamItem.innerHTML = `
+            <input type="text" placeholder="Team name" class="team-name">
+            <select class="team-permission">
+                <option value="pull">Pull</option>
+                <option value="push">Push</option>
+                <option value="maintain">Maintain</option>
+                <option value="admin">Admin</option>
+            </select>
+            <button type="button" class="remove-team-btn" onclick="this.parentElement.remove()">❌</button>
+        `;
+        container.appendChild(teamItem);
+    }
+    
+    async handleValidateMigration() {
+        const config = this.collectMigrationConfig();
+        
+        try {
+            this.showProgress('Validating migration configuration...');
+            await ValidateMigrationConfig(config);
+            this.showSuccess('Migration configuration is valid');
+        } catch (error) {
+            this.showError('Validation failed: ' + error.message);
+        }
+    }
+    
+    async handleMigration(dryRun = false) {
+        const config = this.collectMigrationConfig();
+        config.dry_run = dryRun;
+        
+        try {
+            this.showProgress(dryRun ? 'Running migration dry run...' : 'Starting migration...');
+            
+            const result = await MigrateRepository(config);
+            
+            if (result.success) {
+                this.showMigrationProgress(result.steps);
+                this.showSuccess(result.message);
+            } else {
+                this.showError(result.message);
+            }
+        } catch (error) {
+            this.showError('Migration failed: ' + error.message);
+        }
+    }
+    
+    collectMigrationConfig() {
+        const teams = {};
+        const teamItems = document.querySelectorAll('.team-item');
+        
+        teamItems.forEach(item => {
+            const teamName = item.querySelector('.team-name').value.trim();
+            const permission = item.querySelector('.team-permission').value;
+            
+            if (teamName) {
+                teams[teamName] = permission;
+            }
+        });
+        
+        return {
+            source_bitbucket_url: document.getElementById('source-bitbucket-url').value.trim(),
+            target_github_org: document.getElementById('target-github-org').value.trim(),
+            target_repository_name: document.getElementById('target-repo-name').value.trim(),
+            webhook_url: document.getElementById('webhook-url').value.trim(),
+            teams: teams
+        };
+    }
+    
+    showMigrationProgress(steps) {
+        const progressSection = document.getElementById('migration-progress-section');
+        const stepsContainer = document.getElementById('migration-steps');
+        
+        progressSection.style.display = 'block';
+        stepsContainer.innerHTML = '';
+        
+        steps.forEach((step, index) => {
+            const stepElement = document.createElement('div');
+            stepElement.className = `migration-step ${step.status}`;
+            stepElement.innerHTML = `
+                <div class="step-icon ${step.status}">
+                    ${step.status === 'completed' ? '✓' : 
+                      step.status === 'failed' ? '✗' : 
+                      step.status === 'running' ? '⟳' : index + 1}
+                </div>
+                <div class="step-content">
+                    <div class="step-name">${step.name}</div>
+                    <div class="step-description">${step.description}</div>
+                    ${step.message ? `<div class="step-message">${step.message}</div>` : ''}
+                </div>
+                <div class="step-progress">
+                    <div class="step-progress-bar ${step.status}" style="width: ${step.progress}%"></div>
+                </div>
+            `;
+            stepsContainer.appendChild(stepElement);
+        });
+        
+        // Scroll to progress section
+        progressSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 

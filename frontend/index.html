@@ -156,6 +156,58 @@
             </div>
         </div>
 
+        <!-- Migration Section -->
+        <div class="section">
+            <h2>🚚 Repository Migration</h2>
+            <div class="migration-container">
+                <div class="form-group">
+                    <label for="source-bitbucket-url">Source Bitbucket Repository URL:</label>
+                    <input type="text" id="source-bitbucket-url" placeholder="ssh://git@bitbucket.server:2222/project/repo.git">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="target-github-org">Target GitHub Organization:</label>
+                        <input type="text" id="target-github-org" placeholder="my-org">
+                    </div>
+                    <div class="form-group">
+                        <label for="target-repo-name">Target Repository Name:</label>
+                        <input type="text" id="target-repo-name" placeholder="repo-name">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="webhook-url">Webhook URL (optional):</label>
+                    <input type="text" id="webhook-url" placeholder="https://pipeline.server/webhook">
+                </div>
+                <div class="form-group">
+                    <label for="migration-teams">Teams & Permissions:</label>
+                    <div id="migration-teams" class="teams-container">
+                        <div class="team-item">
+                            <input type="text" placeholder="Team name" class="team-name">
+                            <select class="team-permission">
+                                <option value="pull">Pull</option>
+                                <option value="push">Push</option>
+                                <option value="maintain">Maintain</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                            <button type="button" class="remove-team-btn">❌</button>
+                        </div>
+                    </div>
+                    <button type="button" id="add-team-btn" class="secondary">➕ Add Team</button>
+                </div>
+                <div class="button-group">
+                    <button type="button" id="validate-migration-btn" class="secondary">🔍 Validate</button>
+                    <button type="button" id="migration-dry-run-btn" class="secondary">🧪 Dry Run</button>
+                    <button type="button" id="start-migration-btn">🚚 Start Migration</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Migration Progress Section -->
+        <div id="migration-progress-section" class="section" style="display: none;">
+            <h2>📈 Migration Progress</h2>
+            <div id="migration-steps" class="migration-steps"></div>
+        </div>
+
         <!-- Results Section -->
         <div class="section">
             <h2>📊 Results</h2>

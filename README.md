@@ -1,42 +1,72 @@
 # lgtm
 Loki Grafana Tempo mimir - stack
 
-# GitHub & Bitbucket Replace Tool
+# GitHub & Bitbucket DevOps Tool
 
-A powerful CLI and GUI tool for performing automated string replacements across multiple repositories on **GitHub** and **Bitbucket Server**. Built with Go, featuring both command-line interface (Cobra) and modern web-based GUI (Wails).
+A comprehensive CLI and GUI tool for **automated string replacements** and **repository migrations** across multiple repositories on **GitHub** and **Bitbucket Server**. Built with Go, featuring both command-line interface (Cobra) and modern web-based GUI (Wails).
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ## Features
 
-- 🔄 **Multi-Repository Processing**: Replace strings across GitHub organizations/teams and Bitbucket projects
-- 🔍 **Repository Search**: Find repositories beyond org/team constraints using GitHub search API
-- 🏢 **Multi-Platform Support**: Works with GitHub.com, GitHub Enterprise, and Bitbucket Server
-- 🎯 **Dual Interface**: Professional CLI with interactive spinners + modern web-based GUI
-- 🔎 **Pattern Matching**: Support for regex and literal string replacements
-- 📁 **File Filtering**: Include/exclude patterns for precise file targeting
-- 🧪 **Dry-Run Mode**: Preview changes before execution
-- 🔀 **Automated PRs**: Creates pull requests with your changes automatically
-- ⚡ **Real-Time Progress**: Interactive spinners (CLI) and progress bars (GUI)
-- 🛡️ **Error Handling**: Comprehensive validation and recovery mechanisms
+### 🔄 **String Replacement Engine**
+- **Multi-Repository Processing**: Replace strings across GitHub organizations/teams and Bitbucket projects
+- **Repository Search**: Find repositories beyond org/team constraints using GitHub search API
+- **Pattern Matching**: Support for regex and literal string replacements
+- **File Filtering**: Include/exclude patterns for precise file targeting
+- **Dry-Run Mode**: Preview changes before execution
+- **Automated PRs**: Creates pull requests with your changes automatically
+
+### 🚚 **Repository Migration** ⭐ **NEW**
+- **Bitbucket → GitHub Migration**: Complete repository migration from Bitbucket Server to GitHub
+- **Mirror Clone**: Preserves complete git history including all branches and tags
+- **Team Management**: Automatically assigns GitHub teams with proper permissions
+- **Default Branch Setup**: Renames master to main and updates repository settings
+- **Webhook Integration**: Configures CI/CD pipeline webhooks automatically
+- **Real-Time Progress**: Step-by-step migration tracking with detailed status
+
+### 🎯 **Platform & Interface**
+- **Multi-Platform Support**: Works with GitHub.com, GitHub Enterprise, and Bitbucket Server
+- **Dual Interface**: Professional CLI with interactive spinners + modern web-based GUI
+- **Real-Time Progress**: Interactive spinners (CLI) and progress bars (GUI)
+- **Error Handling**: Comprehensive validation and recovery mechanisms
 
 ## Installation
 
-### Option 1: Build from Source
+### Prerequisites
+
+- Go 1.24+
+- Git
+- Node.js 16+ (for GUI features)
+
+### Option 1: CLI Only
 ```bash
 git clone https://github.com/your-org/go-toolgit.git
 cd go-toolgit
 go build -o go-toolgit
+
+# Use CLI interface
+./go-toolgit --help
 ```
 
-### Option 2: Build with Wails (GUI Support)
+### Option 2: CLI + GUI (Recommended)
 ```bash
+git clone https://github.com/your-org/go-toolgit.git
+cd go-toolgit
+
 # Install Wails CLI
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
-# Build the application
+# Build CLI binary
+go build -o go-toolgit
+
+# Build GUI application
 wails build
+
+# Now you have both:
+# CLI: ./go-toolgit
+# GUI: ./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui
 ```
 
 ## Quick Start
@@ -121,25 +151,51 @@ pull_request:
 ./go-toolgit replace --dry-run --replacements "oldString=newString"
 ```
 
-### 5. Launch GUI
+### 5. Repository Migration (Optional)
 
 ```bash
-# Start the graphical interface
-./go-toolgit --gui
+# Migrate a repository from Bitbucket to GitHub
+./go-toolgit migrate \
+  --source-bitbucket-url "ssh://git@bitbucket.company.com:2222/PROJ/repo.git" \
+  --target-github-org "my-org" \
+  --target-repo-name "migrated-repo"
+```
+
+### 6. Launch GUI
+
+```bash
+# Build GUI application first
+wails build
+
+# Start the graphical interface (includes both replacement and migration features)
+./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui
+
+# Alternative: Use CLI interface without GUI
+./go-toolgit --help
 ```
 
 ## CLI Usage
 
 ### Commands
 
+#### String Replacement Commands
+| Command | Description |
+|---------|-------------|
+| `replace` | Perform string replacements across GitHub repositories |
+| `bitbucket-replace` | Perform string replacements across Bitbucket repositories |
+| `replace-search` | Replace strings in repositories found by search |
+
+#### Repository Migration Commands ⭐ **NEW**
+| Command | Description |
+|---------|-------------|
+| `migrate` | Migrate repository from Bitbucket Server to GitHub |
+
+#### Utility Commands
 | Command | Description |
 |---------|-------------|
 | `validate` | Validate configuration and provider access (GitHub/Bitbucket) |
 | `list` | List repositories accessible to the team/project |
 | `search` | Search for repositories on GitHub using various criteria |
-| `replace` | Perform string replacements across GitHub repositories |
-| `bitbucket-replace` | Perform string replacements across Bitbucket repositories |
-| `replace-search` | Replace strings in repositories found by search |
 | `help` | Show help for any command |
 
 ### Global Flags
@@ -157,6 +213,17 @@ pull_request:
 | `--bitbucket-password` | Bitbucket password/token | `--bitbucket-password mytoken` |
 | `--bitbucket-project` | Bitbucket project key | `--bitbucket-project PROJ` |
 | `--gui` | Launch GUI interface | `--gui` |
+
+### Migration Command Options ⭐ **NEW**
+
+| Flag | Description | Example |
+|------|-------------|---------|
+| `--source-bitbucket-url` | Source Bitbucket repository URL | `--source-bitbucket-url "ssh://git@bitbucket.company.com:2222/PROJ/repo.git"` |
+| `--target-github-org` | Target GitHub organization | `--target-github-org "my-org"` |
+| `--target-repo-name` | Target repository name (optional) | `--target-repo-name "new-repo-name"` |
+| `--webhook-url` | Webhook URL for CI/CD integration | `--webhook-url "https://ci.company.com/webhook"` |
+| `--teams` | Team assignments with permissions | `--teams "team1=pull,team2=maintain,team3=admin"` |
+| `--dry-run` | Preview migration without execution | `--dry-run` |
 
 ### Replace Command Options
 
@@ -197,19 +264,63 @@ Combines all search options above with replacement options:
 
 ## GUI Interface
 
-The web-based GUI provides an intuitive interface for:
+The web-based GUI provides an intuitive interface for both string replacement and repository migration:
 
-- **Configuration Management**: Easy setup of GitHub connection
+### String Replacement Features
+- **Configuration Management**: Easy setup of GitHub/Bitbucket connection
 - **Repository Selection**: Visual selection of target repositories
 - **Rule Builder**: Interactive creation of replacement rules
 - **Progress Tracking**: Real-time processing status
 - **Results Display**: Detailed results with PR links
 
-Launch with: `./go-toolgit --gui`
+### Repository Migration Features ⭐ **NEW**
+- **Migration Wizard**: Step-by-step repository migration setup
+- **Source & Target Configuration**: Bitbucket source and GitHub target settings
+- **Team Permission Management**: Interactive team assignment with permission levels
+- **Webhook Configuration**: CI/CD pipeline integration setup
+- **Real-Time Migration Progress**: Live tracking of all 9 migration steps
+- **Migration Results**: Complete summary with GitHub repository URL and team assignments
+
+Launch with: `./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui`
+
+**Note**: The GUI requires the Wails-built binary. The standard CLI binary (`./go-toolgit`) does not include GUI support.
 
 ## Examples
 
-### Basic String Replacement
+### Repository Migration Examples ⭐ **NEW**
+
+#### Basic Migration
+```bash
+# Migrate single repository from Bitbucket to GitHub
+./go-toolgit migrate \
+  --source-bitbucket-url "ssh://git@bitbucket.company.com:2222/PROJ/my-repo.git" \
+  --target-github-org "my-github-org" \
+  --target-repo-name "my-repo"
+```
+
+#### Advanced Migration with Teams and Webhook
+```bash
+# Complete migration setup with team permissions and CI/CD integration
+./go-toolgit migrate \
+  --source-bitbucket-url "ssh://git@bitbucket.company.com:2222/PROJ/backend-service.git" \
+  --target-github-org "engineering" \
+  --target-repo-name "backend-service" \
+  --webhook-url "https://ci.company.com/github-webhook" \
+  --teams "backend-team=maintain,devops-team=admin,qa-team=pull"
+```
+
+#### Migration with Dry Run
+```bash
+# Preview migration without making actual changes
+./go-toolgit migrate \
+  --source-bitbucket-url "ssh://git@bitbucket.company.com:2222/PROJ/legacy-app.git" \
+  --target-github-org "platform" \
+  --dry-run
+```
+
+### String Replacement Examples
+
+#### Basic String Replacement
 ```bash
 ./go-toolgit replace \
   --org mycompany \
@@ -336,14 +447,29 @@ export GITHUB_REPLACE_BITBUCKET_PROJECT="PROJ"
 ### Building
 
 ```bash
-# CLI only
+# CLI only (string replacement, migration commands)
 go build -o go-toolgit
 
-# With GUI support
+# GUI application (includes migration wizard)
 wails build
 
-# Development mode with live reload
+# Development mode with live reload (GUI)
 wails dev
+
+# Note: The CLI binary works standalone but cannot launch GUI
+# The Wails-built binary includes both CLI and GUI capabilities
+```
+
+### Running the Application
+
+```bash
+# CLI Commands (use standard binary)
+./go-toolgit validate
+./go-toolgit migrate --source-bitbucket-url "..." --target-github-org "..."
+./go-toolgit replace --replacements "old=new"
+
+# GUI Interface (requires Wails-built binary)
+./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui
 ```
 
 ### Project Structure

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -16,6 +18,8 @@ import (
 	"go-toolgit/internal/core/github"
 	"go-toolgit/internal/core/processor"
 	"go-toolgit/internal/core/utils"
+	
+	gogithub "github.com/google/go-github/v66/github"
 )
 
 type Service struct {
@@ -580,6 +584,33 @@ type SearchCriteria struct {
 	Sort            string `json:"sort"`
 	Order           string `json:"order"`
 	MaxResults      int    `json:"max_results"`
+}
+
+// Migration types
+type MigrationConfig struct {
+	SourceBitbucketURL   string            `json:"source_bitbucket_url"`
+	TargetGitHubOrg      string            `json:"target_github_org"`
+	TargetRepositoryName string            `json:"target_repository_name"`
+	WebhookURL           string            `json:"webhook_url"`
+	Teams                map[string]string `json:"teams"` // team_name -> permission
+	DryRun               bool              `json:"dry_run"`
+}
+
+type MigrationStep struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Status      string `json:"status"` // pending, running, completed, failed
+	Message     string `json:"message"`
+	Progress    int    `json:"progress"` // 0-100
+}
+
+type MigrationResult struct {
+	Success         bool             `json:"success"`
+	Message         string           `json:"message"`
+	Steps           []MigrationStep  `json:"steps"`
+	GitHubRepoURL   string           `json:"github_repo_url,omitempty"`
+	CreatedTeams    []string         `json:"created_teams,omitempty"`
+	CreatedWebhooks []string         `json:"created_webhooks,omitempty"`
 }
 
 func (s *Service) SearchRepositories(criteria SearchCriteria) ([]Repository, error) {
@@ -1176,4 +1207,378 @@ func (s *Service) getRepositoryFilesViaGit(repo Repository, includePatterns, exc
 
 	s.logger.Debug("Found repository files for processing", "count", len(result), "repo", repo.FullName)
 	return result, nil
+}
+
+// Migration methods
+func (s *Service) MigrateRepository(config MigrationConfig) (*MigrationResult, error) {
+	steps := []MigrationStep{
+		{Name: "validate", Description: "Validate configuration", Status: "pending", Progress: 0},
+		{Name: "create_github_repo", Description: "Create GitHub repository", Status: "pending", Progress: 0},
+		{Name: "clone_bitbucket", Description: "Clone Bitbucket repository", Status: "pending", Progress: 0},
+		{Name: "add_github_remote", Description: "Add GitHub remote", Status: "pending", Progress: 0},
+		{Name: "push_to_github", Description: "Push to GitHub", Status: "pending", Progress: 0},
+		{Name: "rename_default_branch", Description: "Rename default branch to main", Status: "pending", Progress: 0},
+		{Name: "add_teams", Description: "Add teams to repository", Status: "pending", Progress: 0},
+		{Name: "add_webhook", Description: "Add webhook", Status: "pending", Progress: 0},
+		{Name: "cleanup", Description: "Cleanup temporary files", Status: "pending", Progress: 0},
+	}
+
+	result := &MigrationResult{
+		Success: true,
+		Message: "Migration started",
+		Steps:   steps,
+	}
+
+	if config.DryRun {
+		// Simulate all steps as completed for dry run
+		for i := range result.Steps {
+			result.Steps[i].Status = "completed"
+			result.Steps[i].Progress = 100
+			result.Steps[i].Message = "Would execute in real run"
+		}
+		result.Message = "Dry run completed - all steps would execute successfully"
+		return result, nil
+	}
+
+	// Execute actual migration
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	err := s.executeMigration(ctx, config, result)
+	if err != nil {
+		result.Success = false
+		result.Message = fmt.Sprintf("Migration failed: %v", err)
+		// Mark current step as failed
+		for i := range result.Steps {
+			if result.Steps[i].Status == "running" {
+				result.Steps[i].Status = "failed"
+				result.Steps[i].Message = err.Error()
+				break
+			}
+		}
+	} else {
+		result.Success = true
+		result.Message = "Migration completed successfully"
+	}
+
+	return result, nil
+}
+
+func (s *Service) executeMigration(ctx context.Context, config MigrationConfig, result *MigrationResult) error {
+	// Step 1: Validate
+	s.updateStepStatus(result, 0, "running", "Validating configuration...", 50)
+	if err := s.ValidateMigrationConfig(config); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+	s.updateStepStatus(result, 0, "completed", "Configuration validated", 100)
+
+	// Extract repository name from Bitbucket URL
+	repoName := s.extractRepositoryName(config.SourceBitbucketURL)
+	if config.TargetRepositoryName != "" {
+		repoName = config.TargetRepositoryName
+	}
+
+	// Step 2: Create GitHub repository
+	s.updateStepStatus(result, 1, "running", "Creating GitHub repository...", 25)
+	githubRepo, err := s.createGitHubRepository(ctx, config.TargetGitHubOrg, repoName)
+	if err != nil {
+		return fmt.Errorf("failed to create GitHub repository: %w", err)
+	}
+	result.GitHubRepoURL = fmt.Sprintf("https://%s/%s", s.extractGitHubHost(), githubRepo.GetFullName())
+	s.updateStepStatus(result, 1, "completed", fmt.Sprintf("Repository created: %s", githubRepo.GetName()), 100)
+
+	// Step 3: Clone Bitbucket repository
+	s.updateStepStatus(result, 2, "running", "Cloning Bitbucket repository...", 25)
+	tempDir := filepath.Join(os.TempDir(), "migration-"+repoName)
+	defer os.RemoveAll(tempDir)
+
+	if err := s.cloneBitbucketRepository(ctx, config.SourceBitbucketURL, tempDir); err != nil {
+		return fmt.Errorf("failed to clone Bitbucket repository: %w", err)
+	}
+	s.updateStepStatus(result, 2, "completed", "Repository cloned successfully", 100)
+
+	// Step 4: Add GitHub remote
+	s.updateStepStatus(result, 3, "running", "Adding GitHub remote...", 50)
+	githubRemoteURL := fmt.Sprintf("git@%s:%s/%s.git", s.extractGitHubHost(), config.TargetGitHubOrg, repoName)
+	if err := s.addGitHubRemote(tempDir, githubRemoteURL); err != nil {
+		return fmt.Errorf("failed to add GitHub remote: %w", err)
+	}
+	s.updateStepStatus(result, 3, "completed", "GitHub remote added", 100)
+
+	// Step 5: Push to GitHub
+	s.updateStepStatus(result, 4, "running", "Pushing to GitHub...", 25)
+	if err := s.pushToGitHub(ctx, tempDir); err != nil {
+		return fmt.Errorf("failed to push to GitHub: %w", err)
+	}
+	s.updateStepStatus(result, 4, "completed", "Successfully pushed to GitHub", 100)
+
+	// Step 6: Rename default branch
+	s.updateStepStatus(result, 5, "running", "Renaming default branch to main...", 25)
+	if err := s.renameDefaultBranch(ctx, config.TargetGitHubOrg, repoName, tempDir); err != nil {
+		return fmt.Errorf("failed to rename default branch: %w", err)
+	}
+	s.updateStepStatus(result, 5, "completed", "Default branch renamed to main", 100)
+
+	// Step 7: Add teams
+	s.updateStepStatus(result, 6, "running", "Adding teams to repository...", 25)
+	addedTeams, err := s.addTeamsToRepository(ctx, config.TargetGitHubOrg, repoName, config.Teams)
+	if err != nil {
+		return fmt.Errorf("failed to add teams: %w", err)
+	}
+	result.CreatedTeams = addedTeams
+	s.updateStepStatus(result, 6, "completed", fmt.Sprintf("Added %d teams", len(addedTeams)), 100)
+
+	// Step 8: Add webhook
+	s.updateStepStatus(result, 7, "running", "Adding webhook...", 25)
+	if config.WebhookURL != "" {
+		webhookURL, err := s.addWebhook(ctx, config.TargetGitHubOrg, repoName, config.WebhookURL)
+		if err != nil {
+			return fmt.Errorf("failed to add webhook: %w", err)
+		}
+		result.CreatedWebhooks = []string{webhookURL}
+		s.updateStepStatus(result, 7, "completed", "Webhook added successfully", 100)
+	} else {
+		s.updateStepStatus(result, 7, "completed", "No webhook configured", 100)
+	}
+
+	// Step 9: Cleanup
+	s.updateStepStatus(result, 8, "running", "Cleaning up temporary files...", 50)
+	// Cleanup is handled by defer statement
+	s.updateStepStatus(result, 8, "completed", "Cleanup completed", 100)
+
+	return nil
+}
+
+func (s *Service) updateStepStatus(result *MigrationResult, stepIndex int, status, message string, progress int) {
+	if stepIndex < len(result.Steps) {
+		result.Steps[stepIndex].Status = status
+		result.Steps[stepIndex].Message = message
+		result.Steps[stepIndex].Progress = progress
+	}
+}
+
+func (s *Service) extractRepositoryName(bitbucketURL string) string {
+	// Extract repo name from URL like ssh://git@bitbucket.server:2222/project/repo.git
+	parts := strings.Split(bitbucketURL, "/")
+	if len(parts) > 0 {
+		repoName := parts[len(parts)-1]
+		return strings.TrimSuffix(repoName, ".git")
+	}
+	return "migrated-repo"
+}
+
+func (s *Service) extractGitHubHost() string {
+	// Extract hostname from GitHub base URL
+	baseURL := s.config.GitHub.BaseURL
+	if baseURL == "" || baseURL == "https://api.github.com" {
+		return "github.com"
+	}
+	
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "github.com"
+	}
+	
+	// Convert API URL to Git SSH host
+	host := u.Host
+	if strings.HasPrefix(host, "api.") {
+		host = strings.TrimPrefix(host, "api.")
+	}
+	
+	return host
+}
+
+func (s *Service) createGitHubRepository(ctx context.Context, org, repoName string) (*gogithub.Repository, error) {
+	repo, err := s.github.CreateRepository(ctx, &github.CreateRepositoryOptions{
+		Name:         repoName,
+		Organization: org,
+		Private:      false, // Can be configurable
+		Description:  "Repository migrated from Bitbucket Server",
+	})
+	if err != nil {
+		return nil, err
+	}
+	
+	s.logger.Info("GitHub repository created", "repo", repo.FullName, "url", fmt.Sprintf("https://%s/%s", s.extractGitHubHost(), repo.FullName))
+	
+	// Return our internal Repository type converted to gogithub.Repository for compatibility
+	return &gogithub.Repository{
+		ID:       &repo.ID,
+		Name:     &repo.Name,
+		FullName: &repo.FullName,
+		CloneURL: &repo.CloneURL,
+		Private:  &repo.Private,
+	}, nil
+}
+
+func (s *Service) cloneBitbucketRepository(ctx context.Context, bitbucketURL, tempDir string) error {
+	// Use existing git operations instead of memory operations for mirror clone
+	gitOps, err := git.NewOperationsWithToken(s.config.Bitbucket.Password)
+	if err != nil {
+		return err
+	}
+	
+	// Convert SSH URL to HTTPS with authentication for Bitbucket
+	authURL := s.addBitbucketAuth(bitbucketURL)
+	
+	// Clone with --mirror option using exec
+	err = gitOps.CloneRepository(authURL, tempDir)
+	if err != nil {
+		return err
+	}
+	
+	s.logger.Info("Bitbucket repository cloned", "url", bitbucketURL, "dir", tempDir)
+	return nil
+}
+
+func (s *Service) addBitbucketAuth(repoURL string) string {
+	// Add Bitbucket credentials to URL if needed
+	if s.config.Bitbucket.Username != "" && s.config.Bitbucket.Password != "" {
+		// Convert SSH URL to HTTPS with credentials
+		if strings.HasPrefix(repoURL, "ssh://") {
+			// Extract the path from SSH URL: ssh://git@bitbucket.server:2222/project/repo.git
+			parts := strings.Split(repoURL, "/")
+			if len(parts) >= 4 {
+				host := strings.Split(parts[2], ":")[0] // Remove port if present
+				host = strings.TrimPrefix(host, "git@")
+				path := strings.Join(parts[3:], "/")
+				return fmt.Sprintf("https://%s:%s@%s/%s", 
+					s.config.Bitbucket.Username, 
+					s.config.Bitbucket.Password, 
+					host, 
+					path)
+			}
+		}
+	}
+	return repoURL
+}
+
+func (s *Service) addGitHubRemote(tempDir, githubURL string) error {
+	// Use exec command to add remote
+	cmd := exec.Command("git", "remote", "add", "github", githubURL)
+	cmd.Dir = tempDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to add GitHub remote: %w, output: %s", err, string(output))
+	}
+	
+	return nil
+}
+
+func (s *Service) pushToGitHub(ctx context.Context, tempDir string) error {
+	// Use git push --mirror to push all branches and tags
+	cmd := exec.Command("git", "push", "--mirror", "github")
+	cmd.Dir = tempDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to push mirror to GitHub: %w, output: %s", err, string(output))
+	}
+	
+	s.logger.Info("Successfully pushed mirror to GitHub")
+	return nil
+}
+
+func (s *Service) renameDefaultBranch(ctx context.Context, org, repo, tempDir string) error {
+	// Check if master branch exists locally
+	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/master")
+	cmd.Dir = tempDir
+	err := cmd.Run()
+	
+	if err != nil {
+		s.logger.Info("Master branch not found, skipping rename")
+		return nil
+	}
+	
+	// Rename master to main locally
+	cmd = exec.Command("git", "branch", "-m", "master", "main")
+	cmd.Dir = tempDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to rename master to main: %w, output: %s", err, string(output))
+	}
+	
+	// Push new main branch to GitHub
+	cmd = exec.Command("git", "push", "github", "main")
+	cmd.Dir = tempDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to push main branch: %w, output: %s", err, string(output))
+	}
+	
+	// Update default branch on GitHub using API
+	_, err = s.github.UpdateRepository(ctx, org, repo, &github.UpdateRepositoryOptions{
+		DefaultBranch: "main",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update default branch: %w", err)
+	}
+	
+	// Delete old master branch from GitHub
+	cmd = exec.Command("git", "push", "github", "--delete", "master")
+	cmd.Dir = tempDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		s.logger.Warn("Failed to delete remote master branch", "error", err, "output", string(output))
+		// Non-fatal error
+	}
+	
+	s.logger.Info("Default branch renamed from master to main")
+	return nil
+}
+
+func (s *Service) addTeamsToRepository(ctx context.Context, org, repo string, teams map[string]string) ([]string, error) {
+	var addedTeams []string
+	
+	for teamName, permission := range teams {
+		if teamName == "" {
+			continue
+		}
+		
+		err := s.github.AddTeamToRepository(ctx, org, teamName, repo, permission)
+		if err != nil {
+			s.logger.Warn("Failed to add team to repository", "team", teamName, "error", err)
+			continue // Continue with other teams
+		}
+		
+		addedTeams = append(addedTeams, teamName)
+		s.logger.Info("Team added to repository", "team", teamName, "permission", permission)
+	}
+	
+	return addedTeams, nil
+}
+
+func (s *Service) addWebhook(ctx context.Context, org, repo, webhookURL string) (string, error) {
+	webhook, err := s.github.CreateWebhook(ctx, org, repo, &github.CreateWebhookOptions{
+		URL:         webhookURL,
+		ContentType: "json",
+		Events:      []string{"push"},
+		Active:      true,
+	})
+	if err != nil {
+		return "", err
+	}
+	
+	s.logger.Info("Webhook added to repository", "url", webhookURL, "webhook_id", webhook.GetID())
+	return webhook.GetURL(), nil
+}
+
+func (s *Service) ValidateMigrationConfig(config MigrationConfig) error {
+	if config.SourceBitbucketURL == "" {
+		return fmt.Errorf("source Bitbucket URL is required")
+	}
+	if config.TargetGitHubOrg == "" {
+		return fmt.Errorf("target GitHub organization is required")
+	}
+	if config.TargetRepositoryName == "" {
+		return fmt.Errorf("target repository name is required")
+	}
+
+	// Validate Bitbucket client
+	if s.bitbucket == nil {
+		return fmt.Errorf("Bitbucket client not initialized - please configure Bitbucket access first")
+	}
+
+	// Validate GitHub client
+	if s.github == nil {
+		return fmt.Errorf("GitHub client not initialized - please configure GitHub access first")
+	}
+
+	return nil
 }

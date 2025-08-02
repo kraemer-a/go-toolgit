@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "Frontend for GitHub Replace Tool",
   "scripts": {
-    "dev": "echo 'Frontend dev mode'",
-    "build": "echo 'Frontend build complete'"
+    "dev": "vite --port 34115",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
   }
 }
