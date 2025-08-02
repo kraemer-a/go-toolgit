@@ -20,6 +20,7 @@ import (
 	"go-toolgit/internal/core/utils"
 	
 	gogithub "github.com/google/go-github/v66/github"
+	"gopkg.in/yaml.v3"
 )
 
 type Service struct {
@@ -30,15 +31,20 @@ type Service struct {
 }
 
 type ConfigData struct {
-	Provider         string `json:"provider"` // "github" or "bitbucket"
-	GitHubURL        string `json:"github_url"`
-	Token            string `json:"token"`
-	Organization     string `json:"organization"`
-	Team             string `json:"team"`
-	BitbucketURL     string `json:"bitbucket_url"`
-	BitbucketUser    string `json:"bitbucket_username"`
-	BitbucketPass    string `json:"bitbucket_password"`
-	BitbucketProject string `json:"bitbucket_project"`
+	Provider         string   `json:"provider"` // "github" or "bitbucket"
+	GitHubURL        string   `json:"github_url"`
+	Token            string   `json:"token"`
+	Organization     string   `json:"organization"`
+	Team             string   `json:"team"`
+	BitbucketURL     string   `json:"bitbucket_url"`
+	BitbucketUser    string   `json:"bitbucket_username"`
+	BitbucketPass    string   `json:"bitbucket_password"`
+	BitbucketProject string   `json:"bitbucket_project"`
+	IncludePatterns  []string `json:"include_patterns"`
+	ExcludePatterns  []string `json:"exclude_patterns"`
+	PRTitleTemplate  string   `json:"pr_title_template"`
+	PRBodyTemplate   string   `json:"pr_body_template"`
+	BranchPrefix     string   `json:"branch_prefix"`
 }
 
 type ReplacementRule struct {
@@ -125,6 +131,15 @@ func (s *Service) UpdateConfig(cfg ConfigData) error {
 	s.config.Bitbucket.Password = cfg.BitbucketPass
 	s.config.Bitbucket.Project = cfg.BitbucketProject
 
+	// Update processing patterns
+	s.config.Processing.IncludePatterns = cfg.IncludePatterns
+	s.config.Processing.ExcludePatterns = cfg.ExcludePatterns
+
+	// Update pull request templates
+	s.config.PullRequest.TitleTemplate = cfg.PRTitleTemplate
+	s.config.PullRequest.BodyTemplate = cfg.PRBodyTemplate
+	s.config.PullRequest.BranchPrefix = cfg.BranchPrefix
+
 	// Use search validation if org/team are not provided for GitHub
 	var err error
 	if s.config.Provider == "github" && (s.config.GitHub.Org == "" || s.config.GitHub.Team == "") {
@@ -163,8 +178,82 @@ func (s *Service) UpdateConfig(cfg ConfigData) error {
 		return fmt.Errorf("unsupported provider: %s", s.config.Provider)
 	}
 
-	s.logger.Info("Configuration updated successfully", "provider", s.config.Provider)
+	// Save configuration to ./config.yaml file
+	err = s.saveConfigToFile()
+	if err != nil {
+		return fmt.Errorf("failed to save configuration to file: %w", err)
+	}
+
+	s.logger.Info("Configuration updated and saved successfully", "provider", s.config.Provider)
 	return nil
+}
+
+// saveConfigToFile saves the current configuration to ./config.yaml
+func (s *Service) saveConfigToFile() error {
+	configFile := "./config.yaml"
+	
+	// Convert config to YAML
+	yamlData, err := yaml.Marshal(s.config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config to YAML: %w", err)
+	}
+	
+	// Write to file
+	err = os.WriteFile(configFile, yamlData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	
+	s.logger.Info("Configuration saved to file", "file", configFile)
+	return nil
+}
+
+// ReadConfigFromFile reads configuration from ./config.yaml and returns ConfigData for GUI
+func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
+	configFile := "./config.yaml"
+	
+	// Check if file exists
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		s.logger.Info("Config file does not exist, returning empty config", "file", configFile)
+		return &ConfigData{
+			Provider:  "github", // default
+			GitHubURL: "https://api.github.com", // default
+		}, nil
+	}
+	
+	// Read file
+	yamlData, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+	
+	// Parse YAML into config struct
+	var cfg config.Config
+	err = yaml.Unmarshal(yamlData, &cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config YAML: %w", err)
+	}
+	
+	// Convert to ConfigData for GUI
+	configData := &ConfigData{
+		Provider:         cfg.Provider,
+		GitHubURL:        cfg.GitHub.BaseURL,
+		Token:            cfg.GitHub.Token,
+		Organization:     cfg.GitHub.Org,
+		Team:             cfg.GitHub.Team,
+		BitbucketURL:     cfg.Bitbucket.BaseURL,
+		BitbucketUser:    cfg.Bitbucket.Username,
+		BitbucketPass:    cfg.Bitbucket.Password,
+		BitbucketProject: cfg.Bitbucket.Project,
+		IncludePatterns:  cfg.Processing.IncludePatterns,
+		ExcludePatterns:  cfg.Processing.ExcludePatterns,
+		PRTitleTemplate:  cfg.PullRequest.TitleTemplate,
+		PRBodyTemplate:   cfg.PullRequest.BodyTemplate,
+		BranchPrefix:     cfg.PullRequest.BranchPrefix,
+	}
+	
+	s.logger.Info("Configuration loaded from file", "file", configFile, "provider", cfg.Provider)
+	return configData, nil
 }
 
 func (s *Service) ValidateAccess() error {
@@ -296,6 +385,7 @@ func (s *Service) ProcessReplacements(
 
 	processorRules := make([]processor.ReplacementRule, len(rules))
 	for i, rule := range rules {
+		
 		processorRules[i] = processor.ReplacementRule{
 			Original:      rule.Original,
 			Replacement:   rule.Replacement,
@@ -314,6 +404,8 @@ func (s *Service) ProcessReplacements(
 	if len(excludePatterns) == 0 {
 		excludePatterns = s.config.Processing.ExcludePatterns
 	}
+	
+	s.logger.Info("Using file patterns", "includePatterns", includePatterns, "excludePatterns", excludePatterns)
 
 	engine, err := processor.NewReplacementEngine(processorRules, includePatterns, excludePatterns)
 	if err != nil {
@@ -332,10 +424,13 @@ func (s *Service) ProcessReplacements(
 	}
 
 	for _, repo := range selectedRepos {
+		s.logger.Info("Checking repository", "repo", repo.FullName, "selected", repo.Selected)
 		if !repo.Selected {
+			s.logger.Info("Skipping unselected repository", "repo", repo.FullName)
 			continue
 		}
 
+		s.logger.Info("Processing repository", "repo", repo.FullName)
 		repoResult := s.processRepository(repo, engine, options)
 		result.RepositoryResults = append(result.RepositoryResults, repoResult)
 
@@ -469,24 +564,26 @@ func (s *Service) simulateReplacements(repo Repository, engine *processor.Replac
 			} else {
 				// Handle literal string replacements
 				searchStr := rule.Original
+				
+				// Build regex pattern for whole word support
+				pattern := regexp.QuoteMeta(searchStr)
+				if rule.WholeWord {
+					pattern = `\b` + pattern + `\b`
+				}
+				
+				var re *regexp.Regexp
 				if !rule.CaseSensitive {
-					if strings.Contains(strings.ToLower(modifiedContent), strings.ToLower(searchStr)) {
-						s.logger.Debug("Case-insensitive match found", "fileName", fileName, "searchStr", searchStr)
-						// Case-insensitive replacement
-						re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(searchStr))
-						modifiedContent = re.ReplaceAllString(modifiedContent, rule.Replacement)
-						hasChanges = true
-					} else {
-						s.logger.Debug("No case-insensitive match", "fileName", fileName, "searchStr", searchStr)
-					}
+					re = regexp.MustCompile("(?i)" + pattern)
 				} else {
-					if strings.Contains(modifiedContent, searchStr) {
-						s.logger.Debug("Case-sensitive match found", "fileName", fileName, "searchStr", searchStr)
-						modifiedContent = strings.ReplaceAll(modifiedContent, searchStr, rule.Replacement)
-						hasChanges = true
-					} else {
-						s.logger.Debug("No case-sensitive match", "fileName", fileName, "searchStr", searchStr)
-					}
+					re = regexp.MustCompile(pattern)
+				}
+				
+				if re.MatchString(modifiedContent) {
+					s.logger.Debug("Literal match found", "fileName", fileName, "searchStr", searchStr, "wholeWord", rule.WholeWord)
+					modifiedContent = re.ReplaceAllString(modifiedContent, rule.Replacement)
+					hasChanges = true
+				} else {
+					s.logger.Debug("No literal match", "fileName", fileName, "searchStr", searchStr, "wholeWord", rule.WholeWord)
 				}
 			}
 		}
@@ -1010,22 +1107,25 @@ func (s *Service) applyRepositoryChanges(repo Repository, engine *processor.Repl
 			} else {
 				// Handle literal string replacements
 				searchStr := rule.Original
+				
+				// Build regex pattern for whole word support
+				pattern := regexp.QuoteMeta(searchStr)
+				if rule.WholeWord {
+					pattern = `\b` + pattern + `\b`
+				}
+				
+				var re *regexp.Regexp
 				if !rule.CaseSensitive {
-					if strings.Contains(strings.ToLower(modifiedContent), strings.ToLower(searchStr)) {
-						// Case-insensitive replacement
-						re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(searchStr))
-						matches := re.FindAllString(modifiedContent, -1)
-						modifiedContent = re.ReplaceAllString(modifiedContent, rule.Replacement)
-						hasChanges = true
-						fileReplacements += len(matches)
-					}
+					re = regexp.MustCompile("(?i)" + pattern)
 				} else {
-					count := strings.Count(modifiedContent, searchStr)
-					if count > 0 {
-						modifiedContent = strings.ReplaceAll(modifiedContent, searchStr, rule.Replacement)
-						hasChanges = true
-						fileReplacements += count
-					}
+					re = regexp.MustCompile(pattern)
+				}
+				
+				matches := re.FindAllString(modifiedContent, -1)
+				if len(matches) > 0 {
+					modifiedContent = re.ReplaceAllString(modifiedContent, rule.Replacement)
+					hasChanges = true
+					fileReplacements += len(matches)
 				}
 			}
 		}
@@ -1133,7 +1233,7 @@ func (s *Service) applyRepositoryChanges(repo Repository, engine *processor.Repl
 }
 
 func (s *Service) getRepositoryFilesViaGit(repo Repository, includePatterns, excludePatterns []string) (map[string]string, error) {
-	s.logger.Debug("Getting repository files via git", "repo", repo.FullName)
+	s.logger.Info("Getting repository files via git", "repo", repo.FullName, "includePatterns", includePatterns, "excludePatterns", excludePatterns)
 
 	// Only GitHub is supported for now
 	if s.config.Provider != "github" {
@@ -1161,6 +1261,8 @@ func (s *Service) getRepositoryFilesViaGit(repo Repository, includePatterns, exc
 		return nil, fmt.Errorf("failed to list repository files: %w", err)
 	}
 
+	s.logger.Info("Repository clone successful", "repo", repo.FullName, "totalFiles", len(files))
+	
 	result := make(map[string]string)
 
 	for _, file := range files {
@@ -1183,13 +1285,23 @@ func (s *Service) getRepositoryFilesViaGit(repo Repository, includePatterns, exc
 		// Check if file matches include patterns
 		matched := len(includePatterns) == 0 // If no include patterns, include all
 		for _, pattern := range includePatterns {
+			// First try to match against the full path
+			if m, _ := filepath.Match(pattern, file.Path); m {
+				matched = true
+				break
+			}
+			// Then try to match against just the filename
 			if m, _ := filepath.Match(pattern, filepath.Base(file.Path)); m {
 				matched = true
 				break
 			}
-			if m, _ := filepath.Match(pattern, file.Path); m {
-				matched = true
-				break
+			// Also handle patterns like "*.md" to match any .md file in any directory
+			if strings.HasPrefix(pattern, "*.") {
+				ext := strings.TrimPrefix(pattern, "*")
+				if strings.HasSuffix(file.Path, ext) {
+					matched = true
+					break
+				}
 			}
 		}
 
@@ -1201,11 +1313,14 @@ func (s *Service) getRepositoryFilesViaGit(repo Repository, includePatterns, exc
 				continue
 			}
 
+			s.logger.Info("Including file for processing", "fileName", file.Path, "contentLength", len(content))
 			result[file.Path] = content
+		} else {
+			s.logger.Debug("File does not match patterns", "fileName", file.Path, "includePatterns", includePatterns)
 		}
 	}
 
-	s.logger.Debug("Found repository files for processing", "count", len(result), "repo", repo.FullName)
+	s.logger.Info("Found repository files for processing", "count", len(result), "repo", repo.FullName)
 	return result, nil
 }
 

@@ -254,13 +254,15 @@ func (e *ReplacementEngine) isBinaryFile(filePath string) bool {
 func (e *ReplacementEngine) replaceWholeWords(content, original, replacement string) (string, int) {
 	pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(original) + `\b`)
 	matches := pattern.FindAllString(content, -1)
-	return pattern.ReplaceAllString(content, replacement), len(matches)
+	result := pattern.ReplaceAllString(content, replacement)
+	return result, len(matches)
 }
 
 func (e *ReplacementEngine) replaceWholeWordsInsensitive(content, original, replacement string) (string, int) {
 	pattern := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(original) + `\b`)
 	matches := pattern.FindAllString(content, -1)
-	return pattern.ReplaceAllString(content, replacement), len(matches)
+	result := pattern.ReplaceAllString(content, replacement)
+	return result, len(matches)
 }
 
 func (e *ReplacementEngine) replaceAllInsensitive(content, original, replacement string) string {

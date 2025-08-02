@@ -17,9 +17,19 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "go-toolgit",
-	Short: "Replace strings across GitHub repositories in organizations and teams",
-	Long: `A tool to perform automated string replacements across multiple repositories
-belonging to a GitHub organization and team. Supports both CLI and GUI interfaces.
+	Short: "DevOps tool for string replacements and repository migrations",
+	Long: `A comprehensive CLI and GUI tool for automated string replacements and repository 
+migrations across multiple repositories on GitHub and Bitbucket Server.
+
+Features:
+• String replacement across multiple repositories
+• Repository migration from Bitbucket Server to GitHub
+• Dual GUI support: Wails web interface and Fyne native interface
+• Team management and webhook configuration
+
+GUI Options:
+  --gui       Launch Wails web-based GUI (requires: wails build)
+  --fyne-gui  Launch Fyne native GUI (works with standard build)
 
 The tool can connect to on-premise GitHub instances and create pull requests
 with the changes automatically.`,

@@ -179,9 +179,23 @@ func FilterFiles(files []FileContent, includePatterns, excludePatterns []string)
 		// Check include patterns
 		included := len(includePatterns) == 0 // If no include patterns, include all (unless excluded)
 		for _, pattern := range includePatterns {
+			// First try to match against the full path
+			if matched, _ := filepath.Match(pattern, file.Path); matched {
+				included = true
+				break
+			}
+			// Then try to match against just the filename
 			if matched, _ := filepath.Match(pattern, filepath.Base(file.Path)); matched {
 				included = true
 				break
+			}
+			// Also handle patterns like "*.md" to match any .md file in any directory
+			if strings.HasPrefix(pattern, "*.") {
+				ext := strings.TrimPrefix(pattern, "*")
+				if strings.HasSuffix(file.Path, ext) {
+					included = true
+					break
+				}
 			}
 		}
 

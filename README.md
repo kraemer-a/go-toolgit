@@ -35,19 +35,20 @@ A comprehensive CLI and GUI tool for **automated string replacements** and **rep
 
 - Go 1.24+
 - Git
-- Node.js 16+ (for GUI features)
+- Node.js 16+ (only for Wails web GUI)
 
-### Option 1: CLI Only
+### Option 1: CLI + Fyne Native GUI (Recommended)
 ```bash
 git clone https://github.com/your-org/go-toolgit.git
 cd go-toolgit
 go build -o go-toolgit
 
-# Use CLI interface
-./go-toolgit --help
+# Now you have both:
+# CLI: ./go-toolgit --help
+# Native GUI: ./go-toolgit --fyne-gui
 ```
 
-### Option 2: CLI + GUI (Recommended)
+### Option 2: CLI + Wails Web GUI (Advanced)
 ```bash
 git clone https://github.com/your-org/go-toolgit.git
 cd go-toolgit
@@ -58,12 +59,22 @@ go install github.com/wailsapp/wails/v2/cmd/wails@latest
 # Build CLI binary
 go build -o go-toolgit
 
-# Build GUI application
+# Build Wails GUI application
 wails build
 
 # Now you have both:
 # CLI: ./go-toolgit
-# GUI: ./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui
+# Web GUI: ./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui
+```
+
+### Option 3: CLI Only
+```bash
+git clone https://github.com/your-org/go-toolgit.git
+cd go-toolgit
+go build -o go-toolgit
+
+# Use CLI interface only
+./go-toolgit --help
 ```
 
 ## Quick Start
@@ -160,15 +171,26 @@ pull_request:
 
 ### 6. Launch GUI
 
+Choose between two GUI options:
+
+#### Option A: Fyne Native GUI (Recommended for simplicity)
 ```bash
-# Build GUI application first
+# Works with standard Go build - no additional setup needed
+./go-toolgit --fyne-gui
+```
+
+#### Option B: Wails Web GUI (Advanced web interface)
+```bash
+# Requires Wails build first
 wails build
-
-# Start the graphical interface (includes both replacement and migration features)
 ./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui
+```
 
-# Alternative: Use CLI interface without GUI
+#### CLI Interface
+```bash
+# Use command-line interface
 ./go-toolgit --help
+./go-toolgit migrate --help
 ```
 
 ## CLI Usage
@@ -261,7 +283,18 @@ Combines all search options above with replacement options:
 
 ## GUI Interface
 
-The web-based GUI provides an intuitive interface for both string replacement and repository migration:
+Choose between two modern GUI interfaces for both string replacement and repository migration:
+
+### Fyne Native GUI ⭐ **NEW** (Recommended)
+- **Native Performance**: True native desktop application
+- **Easy Deployment**: Works with standard Go build, no additional setup
+- **Cross-Platform**: Runs on Windows, macOS, and Linux
+- **All Features**: Complete migration and replacement functionality
+
+### Wails Web GUI
+- **Modern Web Interface**: HTML/CSS/JavaScript based UI
+- **Advanced Styling**: Rich web-based experience
+- **Requires Build**: Needs `wails build` command
 
 ### String Replacement Features
 - **Configuration Management**: Easy setup of GitHub/Bitbucket connection
@@ -278,9 +311,9 @@ The web-based GUI provides an intuitive interface for both string replacement an
 - **Real-Time Migration Progress**: Live tracking of all 9 migration steps
 - **Migration Results**: Complete summary with GitHub repository URL and team assignments
 
-Launch with: `./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui`
-
-**Note**: The GUI requires the Wails-built binary. The standard CLI binary (`./go-toolgit`) does not include GUI support.
+Launch options:
+- **Fyne Native GUI**: `./go-toolgit --fyne-gui` (works with standard build)
+- **Wails Web GUI**: `./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui` (requires Wails build)
 
 ## Examples
 
