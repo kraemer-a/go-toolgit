@@ -1,7 +1,4 @@
-# lgtm
-Loki Grafana Tempo mimir - stack
-
-# GitHub & Bitbucket DevOps Tool
+# GitHub & Bitbucket Replace Tool
 
 A comprehensive CLI and GUI tool for **automated string replacements** and **repository migrations** across multiple repositories on **GitHub** and **Bitbucket Server**. Built with Go, featuring both command-line interface (Cobra) and modern web-based GUI (Wails).
 
