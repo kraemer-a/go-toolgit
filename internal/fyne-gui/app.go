@@ -953,6 +953,11 @@ func (f *FyneApp) handleReplacementDryRun() {
 			return
 		}
 
+		// Increment API call counter for repository processing (each repo requires multiple API calls)
+		for range repos {
+			f.operationStatus.IncrementAPICall() // Repository access/clone
+		}
+
 		// Count actual repositories with changes
 		reposWithChanges := 0
 		totalFiles := 0
@@ -1031,6 +1036,11 @@ func (f *FyneApp) handleProcessReplacements() {
 			return
 		}
 
+		// Increment API call counter for dry run processing (pre-processing check)
+		for range repos {
+			f.operationStatus.IncrementAPICall() // Repository access/clone for dry run
+		}
+
 		// Filter repositories to only include those with actual changes
 		var reposWithChanges []gui.Repository
 		repoMap := make(map[string]gui.Repository)
@@ -1074,6 +1084,11 @@ func (f *FyneApp) handleProcessReplacements() {
 			f.hideLoading()
 			f.setStatusError(fmt.Sprintf("Processing failed: %v", err))
 			return
+		}
+
+		// Increment API call counter for actual processing (PR creation)
+		for range reposWithChanges {
+			f.operationStatus.IncrementAPICall() // Pull request creation
 		}
 
 		f.hideLoading()
@@ -1696,6 +1711,11 @@ func (f *FyneApp) applyChanges(rules []gui.ReplacementRule, repos []gui.Reposito
 			return
 		}
 
+		// Increment API call counter for dry run processing (pre-processing check)
+		for range repos {
+			f.operationStatus.IncrementAPICall() // Repository access/clone for dry run
+		}
+
 		// Filter repositories to only include those with actual changes
 		var reposWithChanges []gui.Repository
 		repoMap := make(map[string]gui.Repository)
@@ -1739,6 +1759,11 @@ func (f *FyneApp) applyChanges(rules []gui.ReplacementRule, repos []gui.Reposito
 			f.hideLoading()
 			f.setStatusError(fmt.Sprintf("Processing failed: %v", err))
 			return
+		}
+
+		// Increment API call counter for actual processing (PR creation)
+		for range reposWithChanges {
+			f.operationStatus.IncrementAPICall() // Pull request creation
 		}
 
 		f.hideLoading()

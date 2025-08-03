@@ -1,6 +1,6 @@
 # GitHub & Bitbucket Replace Tool
 
-A comprehensive CLI and GUI tool for **automated string replacements** and **repository migrations** across multiple repositories on **GitHub** and **Bitbucket Server**. Built with Go, featuring both command-line interface (Cobra) and modern web-based GUI (Wails).
+A comprehensive CLI and GUI tool for **automated string replacements** and **repository migrations** across multiple repositories on **GitHub** and **Bitbucket Server**. Built with Go, featuring command-line interface (Cobra), modern web-based GUI (Wails), and native desktop GUI (Fyne).
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -25,7 +25,7 @@ A comprehensive CLI and GUI tool for **automated string replacements** and **rep
 
 ### 🎯 **Platform & Interface**
 - **Multi-Platform Support**: Works with GitHub.com, GitHub Enterprise, and Bitbucket Server
-- **Dual Interface**: Professional CLI with interactive spinners + modern web-based GUI
+- **Triple Interface**: Professional CLI with interactive spinners + modern web-based GUI (Wails) + native desktop GUI (Fyne)
 - **Real-Time Progress**: Interactive spinners (CLI) and progress bars (GUI)
 - **Error Handling**: Comprehensive validation and recovery mechanisms
 
@@ -36,6 +36,7 @@ A comprehensive CLI and GUI tool for **automated string replacements** and **rep
 - Go 1.24+
 - Git
 - Node.js 16+ (only for Wails web GUI)
+- Fyne dependencies (for native GUI - auto-installed with Go modules)
 
 ### Option 1: CLI + Fyne Native GUI (Recommended)
 ```bash
