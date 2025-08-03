@@ -415,3 +415,159 @@ func BenchmarkPatternEditor_GetPatternsAsString(b *testing.B) {
 		editor.GetPatternsAsString()
 	}
 }
+
+// Test optimization features
+
+func TestPatternEditor_PoolingOptimization(t *testing.T) {
+	editor := NewPatternEditor("Test", []string{}, func(p []string) {})
+
+	// Add patterns to populate the pool
+	editor.addPattern("*.go")
+	editor.addPattern("*.js")
+	editor.addPattern("*.py")
+
+	// Check initial pool stats
+	poolSize, activeChips := editor.GetPoolStats()
+	if activeChips != 3 {
+		t.Errorf("Expected 3 active chips, got %d", activeChips)
+	}
+
+	// Remove all patterns (should return chips to pool)
+	editor.removeAllPatterns()
+
+	// Check that chips are pooled
+	poolSize, activeChips = editor.GetPoolStats()
+	if activeChips != 0 {
+		t.Errorf("Expected 0 active chips after removal, got %d", activeChips)
+	}
+	if poolSize == 0 {
+		t.Error("Expected chips to be returned to pool")
+	}
+
+	// Add patterns again (should reuse from pool)
+	editor.addPattern("*.tsx")
+	editor.addPattern("*.vue")
+
+	poolSize, activeChips = editor.GetPoolStats()
+	if activeChips != 2 {
+		t.Errorf("Expected 2 active chips after re-adding, got %d", activeChips)
+	}
+}
+
+func TestPatternEditor_BatchUpdates(t *testing.T) {
+	callbackCount := 0
+	editor := NewPatternEditor("Test", []string{}, func(p []string) {
+		callbackCount++
+	})
+
+	// Suspend updates
+	editor.SuspendUpdates()
+
+	// Add multiple patterns (should not trigger UI updates)
+	editor.addPattern("*.go")
+	editor.addPattern("*.js")
+	editor.addPattern("*.py")
+
+	// Check that patterns were added but UI updates were suspended
+	patterns := editor.GetPatterns()
+	if len(patterns) != 3 {
+		t.Errorf("Expected 3 patterns, got %d", len(patterns))
+	}
+
+	// Resume updates (should trigger one update)
+	editor.ResumeUpdates()
+
+	// Verify final state
+	_, activeChips := editor.GetPoolStats()
+	if activeChips != 3 {
+		t.Errorf("Expected 3 active chips after resume, got %d", activeChips)
+	}
+}
+
+func TestTagChip_Reuse(t *testing.T) {
+	chip := NewTagChip("Original", nil)
+
+	// Test SetText
+	chip.SetText("Updated")
+	if chip.Text != "Updated" {
+		t.Errorf("Expected text 'Updated', got '%s'", chip.Text)
+	}
+
+	// Test Reset
+	chip.Reset()
+	if chip.Text != "" {
+		t.Errorf("Expected empty text after reset, got '%s'", chip.Text)
+	}
+	if chip.OnDeleted != nil {
+		t.Error("Expected OnDeleted to be nil after reset")
+	}
+}
+
+// Benchmark realistic usage: adding patterns incrementally
+func BenchmarkPatternEditor_AddPatternOptimized(b *testing.B) {
+	patterns := []string{"*.go", "*.js", "*.py", "*.ts", "*.jsx", "*.vue", "*.css", "*.html", "*.xml", "*.json"}
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		editor := NewPatternEditor("Test", []string{}, func(p []string) {})
+		
+		// Add patterns one by one (realistic usage)
+		for j := 0; j < len(patterns) && j < 5; j++ { // Limit to 5 patterns per iteration
+			editor.addPattern(patterns[j])
+		}
+	}
+}
+
+func BenchmarkPatternEditor_BatchOperations(b *testing.B) {
+	patterns := []string{"*.go", "*.js", "*.py", "*.ts", "*.jsx", "*.vue", "*.css", "*.html", "*.xml", "*.json"}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		editor := NewPatternEditor("Test", []string{}, func(p []string) {})
+		
+		// Use batch operations
+		editor.SuspendUpdates()
+		for _, pattern := range patterns {
+			editor.addPattern(pattern)
+		}
+		editor.ResumeUpdates()
+	}
+}
+
+// Benchmark widget reuse scenario
+func BenchmarkPatternEditor_WidgetReuse(b *testing.B) {
+	editor := NewPatternEditor("Test", []string{}, func(p []string) {})
+	patterns := []string{"*.go", "*.js", "*.py", "*.ts", "*.jsx"}
+	
+	// Pre-populate to create widgets
+	for _, pattern := range patterns {
+		editor.addPattern(pattern)
+	}
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Remove all patterns (widgets go to pool)
+		editor.removeAllPatterns()
+		
+		// Add them back (should reuse from pool)
+		for _, pattern := range patterns {
+			editor.addPattern(pattern)
+		}
+	}
+}
+
+// Compare against non-optimized approach
+func BenchmarkPatternEditor_NoPooling(b *testing.B) {
+	patterns := []string{"*.go", "*.js", "*.py", "*.ts", "*.jsx"}
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		editor := NewPatternEditor("Test", []string{}, func(p []string) {})
+		
+		// Simulate the old approach - force use of updateTags (if we had kept it)
+		for _, pattern := range patterns {
+			editor.patterns = append(editor.patterns, pattern)
+			editor.updateTags() // Use original method
+		}
+	}
+}

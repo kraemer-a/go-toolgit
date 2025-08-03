@@ -14,6 +14,16 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+// Icon cache to avoid repeated SVG processing
+var (
+	cachedCancelIcon fyne.Resource
+)
+
+func init() {
+	// Cache the cancel icon at package initialization
+	cachedCancelIcon = theme.CancelIcon()
+}
+
 // ToggleSwitch is a custom toggle switch widget
 type ToggleSwitch struct {
 	widget.BaseWidget
@@ -273,7 +283,7 @@ func (t *TagChip) CreateRenderer() fyne.WidgetRenderer {
 	t.label.TextStyle = fyne.TextStyle{Bold: true}
 
 	if t.OnDeleted != nil {
-		t.deleteBtn = widget.NewButtonWithIcon("", theme.CancelIcon(), t.OnDeleted)
+		t.deleteBtn = widget.NewButtonWithIcon("", cachedCancelIcon, t.OnDeleted)
 		t.deleteBtn.Importance = widget.LowImportance
 
 		t.container = container.NewStack(
@@ -310,6 +320,39 @@ func (t *TagChip) MouseOut() {
 
 // MouseMoved handles mouse move events
 func (t *TagChip) MouseMoved(*desktop.MouseEvent) {}
+
+// SetText updates the text of an existing TagChip (for reuse optimization)
+func (t *TagChip) SetText(text string) {
+	t.Text = text
+	if t.label != nil {
+		t.label.SetText(text)
+	}
+}
+
+// SetOnDeleted updates the deletion callback (for reuse optimization)
+func (t *TagChip) SetOnDeleted(onDeleted func()) {
+	t.OnDeleted = onDeleted
+	if t.deleteBtn != nil && onDeleted != nil {
+		t.deleteBtn.OnTapped = onDeleted
+	}
+}
+
+// Reset prepares the TagChip for reuse by clearing its state
+func (t *TagChip) Reset() {
+	t.Text = ""
+	t.OnDeleted = nil
+	if t.label != nil {
+		t.label.SetText("")
+	}
+	if t.deleteBtn != nil {
+		t.deleteBtn.OnTapped = nil
+	}
+}
+
+// IsCreated checks if the TagChip renderer has been created
+func (t *TagChip) IsCreated() bool {
+	return t.container != nil
+}
 
 // EnhancedProgressBar is a progress bar with percentage display
 type EnhancedProgressBar struct {

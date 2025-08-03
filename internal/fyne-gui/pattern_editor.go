@@ -22,6 +22,11 @@ type PatternEditor struct {
 	removeAllButton *widget.Button
 	tagsContainer   *fyne.Container
 	scrollContainer *container.Scroll
+
+	// Performance optimization fields
+	chipPool    []*TagChip // Pool of reusable TagChip widgets
+	activeChips []*TagChip // Currently displayed chips
+	updatesSuspended bool  // Flag to batch updates
 }
 
 // NewPatternEditor creates a new pattern editor
@@ -56,8 +61,12 @@ func NewPatternEditor(placeholder string, patterns []string, onChanged func([]st
 	p.scrollContainer = container.NewHScroll(p.tagsContainer)
 	p.scrollContainer.SetMinSize(fyne.NewSize(0, 40))
 
+	// Initialize pools
+	p.chipPool = make([]*TagChip, 0, 10) // Pre-allocate for 10 chips
+	p.activeChips = make([]*TagChip, 0, len(patterns))
+
 	// Initialize with existing patterns
-	p.updateTags()
+	p.updateTagsOptimized()
 
 	return p
 }
@@ -105,7 +114,9 @@ func (p *PatternEditor) addPattern(pattern string) {
 
 	// Add pattern
 	p.patterns = append(p.patterns, pattern)
-	p.updateTags()
+	if !p.updatesSuspended {
+		p.updateTagsOptimized()
+	}
 	p.entry.SetText("")
 
 	if p.onChanged != nil {
@@ -123,7 +134,9 @@ func (p *PatternEditor) removePattern(pattern string) {
 	}
 
 	p.patterns = newPatterns
-	p.updateTags()
+	if !p.updatesSuspended {
+		p.updateTagsOptimized()
+	}
 
 	if p.onChanged != nil {
 		p.onChanged(p.patterns)
@@ -137,7 +150,9 @@ func (p *PatternEditor) removeAllPatterns() {
 	}
 	
 	p.patterns = []string{}
-	p.updateTags()
+	if !p.updatesSuspended {
+		p.updateTagsOptimized()
+	}
 
 	if p.onChanged != nil {
 		p.onChanged(p.patterns)
@@ -162,7 +177,9 @@ func (p *PatternEditor) updateTags() {
 // SetPatterns sets the patterns
 func (p *PatternEditor) SetPatterns(patterns []string) {
 	p.patterns = patterns
-	p.updateTags()
+	if !p.updatesSuspended {
+		p.updateTagsOptimized()
+	}
 }
 
 // GetPatterns returns the current patterns
@@ -173,4 +190,93 @@ func (p *PatternEditor) GetPatterns() []string {
 // GetPatternsAsString returns patterns as a comma-separated string
 func (p *PatternEditor) GetPatternsAsString() string {
 	return strings.Join(p.patterns, ",")
+}
+
+// Performance optimization methods
+
+// getPooledChip gets a TagChip from the pool or creates a new one
+func (p *PatternEditor) getPooledChip(text string, onDeleted func()) *TagChip {
+	var chip *TagChip
+	
+	// Try to get from pool
+	if len(p.chipPool) > 0 {
+		chip = p.chipPool[len(p.chipPool)-1]
+		p.chipPool = p.chipPool[:len(p.chipPool)-1]
+		
+		// Reuse the existing chip
+		chip.SetText(text)
+		chip.SetOnDeleted(onDeleted)
+	} else {
+		// Create new chip if pool is empty
+		chip = NewTagChip(text, onDeleted)
+	}
+	
+	return chip
+}
+
+// returnChipToPool returns a TagChip to the pool for reuse
+func (p *PatternEditor) returnChipToPool(chip *TagChip) {
+	// Reset the chip state
+	chip.Reset()
+	
+	// Add back to pool if we haven't hit capacity
+	if len(p.chipPool) < cap(p.chipPool) {
+		p.chipPool = append(p.chipPool, chip)
+	}
+}
+
+// updateTagsOptimized performs differential updates using widget pooling
+func (p *PatternEditor) updateTagsOptimized() {
+	if p.updatesSuspended {
+		return
+	}
+
+	// Return excess chips to pool
+	for i := len(p.patterns); i < len(p.activeChips); i++ {
+		p.tagsContainer.Remove(p.activeChips[i])
+		p.returnChipToPool(p.activeChips[i])
+	}
+
+	// Resize active chips slice
+	if len(p.patterns) < len(p.activeChips) {
+		p.activeChips = p.activeChips[:len(p.patterns)]
+	}
+
+	// Update or create chips for current patterns
+	for i, pattern := range p.patterns {
+		patternCopy := pattern // Capture for closure outside the conditional
+		if i < len(p.activeChips) {
+			// Update existing chip
+			chip := p.activeChips[i]
+			chip.SetText(pattern)
+			chip.SetOnDeleted(func() {
+				p.removePattern(patternCopy)
+			})
+		} else {
+			// Create new chip (from pool or new)
+			chip := p.getPooledChip(pattern, func() {
+				p.removePattern(patternCopy)
+			})
+			p.activeChips = append(p.activeChips, chip)
+			p.tagsContainer.Add(chip)
+		}
+	}
+
+	p.tagsContainer.Refresh()
+}
+
+// SuspendUpdates temporarily disables UI updates for batch operations
+func (p *PatternEditor) SuspendUpdates() {
+	p.updatesSuspended = true
+}
+
+// ResumeUpdates re-enables UI updates and refreshes the display
+func (p *PatternEditor) ResumeUpdates() {
+	p.updatesSuspended = false
+	p.updateTagsOptimized()
+}
+
+// GetPoolStats returns statistics about the widget pool (for debugging)
+func (p *PatternEditor) GetPoolStats() (poolSize, activeChips int) {
+	return len(p.chipPool), len(p.activeChips)
 }
