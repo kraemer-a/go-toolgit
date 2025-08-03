@@ -101,9 +101,13 @@ func NewFyneApp() *FyneApp {
 
 	fyneApp := app.NewWithID("com.github.go-toolgit")
 
-	// Apply modern theme
-	modernTheme := NewModernTheme(true) // Start with dark theme
-	fyneApp.Settings().SetTheme(modernTheme)
+	// Initialize with Adwaita theme and dark mode
+	modernTheme := NewModernTheme(true) // Keep for fallback
+	adwaitaTheme := &AdwaitaVariantTheme{
+		baseTheme: xtheme.AdwaitaTheme(),
+		variant:   theme.VariantDark,
+	}
+	fyneApp.Settings().SetTheme(adwaitaTheme)
 
 	window := fyneApp.NewWindow("GitHub & Bitbucket DevOps Tool")
 	window.Resize(fyne.NewSize(1200, 1000))
@@ -117,7 +121,7 @@ func NewFyneApp() *FyneApp {
 		service:          service,
 		logger:           logger,
 		modernTheme:      modernTheme.(*ModernTheme),
-		currentThemeType: "Modern",
+		currentThemeType: "Adwaita",
 		isDarkMode:       true,
 	}
 }
@@ -168,7 +172,7 @@ func (f *FyneApp) setupUI() {
 		f.currentThemeType = selected
 		f.applyTheme()
 	})
-	themeSelector.SetSelected("Modern")
+	themeSelector.SetSelected("Adwaita")
 
 	// Create theme toggle for dark/light mode
 	themeToggle := NewToggleSwitch("Dark Mode", func(dark bool) {
@@ -324,7 +328,6 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 	// Repository selection with scroll
 	f.repoSelectionContainer = container.New(layout.NewVBoxLayout())
 	repoScroll := container.NewScroll(f.repoSelectionContainer)
-	repoScroll.SetMinSize(fyne.NewSize(0, 250))
 
 	loadReposBtn := widget.NewButtonWithIcon("🔄 Load Repositories", theme.DownloadIcon(), f.handleLoadRepositories)
 	loadReposBtn.Importance = widget.HighImportance
@@ -391,13 +394,18 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 		widget.NewSeparator(),
 	)
 	
-	repoCard := widget.NewCard("", "", 
-		container.New(layout.NewVBoxLayout(), 
-			repoHeader,
-			repoButtons,
-			widget.NewSeparator(),
-			repoScroll,
-		))
+	// Group fixed-height elements for the top section
+	topSection := container.New(layout.NewVBoxLayout(),
+		repoHeader,
+		repoButtons,
+		widget.NewSeparator(),
+	)
+	
+	// Use BorderLayout so scroll area expands to fill available space
+	repoContainer := container.New(layout.NewBorderLayout(topSection, nil, nil, nil),
+		topSection,  // Top border (fixed height)
+		repoScroll,  // Center (expands to fill)
+	)
 
 	buttonsContainer := container.NewPadded(
 		container.New(
@@ -417,13 +425,10 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 			settingsCard,
 		),
 	)
-	leftColumn.SetMinSize(fyne.NewSize(600, 0))
+	leftColumn.SetMinSize(fyne.NewSize(600, 400))
 
-	rightColumn := container.New(
-		layout.NewVBoxLayout(),
-		repoCard,
-	)
-	rightColumn.Resize(fyne.NewSize(500, 0))
+	rightColumn := repoContainer
+	rightColumn.Resize(fyne.NewSize(500, 400))
 
 	// Create horizontal split layout
 	mainContent := container.New(
