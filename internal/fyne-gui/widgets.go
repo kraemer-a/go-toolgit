@@ -1,0 +1,358 @@
+package fynegui
+
+import (
+	"fmt"
+	"image/color"
+	"time"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
+)
+
+// ToggleSwitch is a custom toggle switch widget
+type ToggleSwitch struct {
+	widget.BaseWidget
+
+	OnChanged func(bool)
+	Checked   bool
+	Text      string
+
+	background *canvas.Rectangle
+	handle     *canvas.Circle
+	label      *widget.Label
+	animation  *fyne.Animation
+}
+
+// NewToggleSwitch creates a new toggle switch
+func NewToggleSwitch(text string, changed func(bool)) *ToggleSwitch {
+	t := &ToggleSwitch{
+		Text:      text,
+		OnChanged: changed,
+	}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+// CreateRenderer creates the renderer for the toggle switch
+func (t *ToggleSwitch) CreateRenderer() fyne.WidgetRenderer {
+	t.background = canvas.NewRectangle(color.RGBA{200, 200, 200, 255})
+	t.background.CornerRadius = 12
+	t.background.StrokeWidth = 0
+
+	t.handle = canvas.NewCircle(color.White)
+	t.handle.StrokeWidth = 0
+
+	t.label = widget.NewLabel(t.Text)
+
+	objects := []fyne.CanvasObject{
+		t.background,
+		t.handle,
+	}
+
+	return &toggleSwitchRenderer{
+		toggle:  t,
+		objects: objects,
+	}
+}
+
+// Tapped handles tap events
+func (t *ToggleSwitch) Tapped(_ *fyne.PointEvent) {
+	t.SetChecked(!t.Checked)
+}
+
+// SetChecked sets the checked state with animation
+func (t *ToggleSwitch) SetChecked(checked bool) {
+	if t.Checked == checked {
+		return
+	}
+
+	t.Checked = checked
+
+	// If the handle isn't created yet, just set the state
+	if t.handle == nil || t.background == nil {
+		if t.OnChanged != nil {
+			t.OnChanged(checked)
+		}
+		return
+	}
+
+	// Animate the toggle
+	startX := t.handle.Position().X
+	var endX float32
+	if checked {
+		endX = 26
+		t.background.FillColor = color.RGBA{R: 59, G: 130, B: 246, A: 255} // Softer blue
+	} else {
+		endX = 2
+		t.background.FillColor = color.RGBA{156, 163, 175, 255} // Gray
+	}
+
+	if t.animation != nil {
+		t.animation.Stop()
+	}
+
+	t.animation = fyne.NewAnimation(200*time.Millisecond, func(progress float32) {
+		newX := startX + (endX-startX)*progress
+		t.handle.Move(fyne.NewPos(newX, 2))
+		t.background.Refresh()
+		t.handle.Refresh()
+	})
+
+	t.animation.Curve = fyne.AnimationEaseInOut
+	t.animation.Start()
+
+	if t.OnChanged != nil {
+		t.OnChanged(checked)
+	}
+}
+
+// toggleSwitchRenderer is the renderer for ToggleSwitch
+type toggleSwitchRenderer struct {
+	toggle  *ToggleSwitch
+	objects []fyne.CanvasObject
+}
+
+func (r *toggleSwitchRenderer) Layout(size fyne.Size) {
+	r.toggle.background.Resize(fyne.NewSize(48, 24))
+	r.toggle.handle.Resize(fyne.NewSize(20, 20))
+
+	if r.toggle.Checked {
+		r.toggle.handle.Move(fyne.NewPos(26, 2))
+	} else {
+		r.toggle.handle.Move(fyne.NewPos(2, 2))
+	}
+}
+
+func (r *toggleSwitchRenderer) MinSize() fyne.Size {
+	return fyne.NewSize(48, 24)
+}
+
+func (r *toggleSwitchRenderer) Refresh() {
+	if r.toggle.Checked {
+		r.toggle.background.FillColor = color.RGBA{R: 59, G: 130, B: 246, A: 255} // Softer blue
+		r.toggle.handle.Move(fyne.NewPos(26, 2))
+	} else {
+		r.toggle.background.FillColor = color.RGBA{156, 163, 175, 255} // Gray
+		r.toggle.handle.Move(fyne.NewPos(2, 2))
+	}
+	r.toggle.background.Refresh()
+}
+
+func (r *toggleSwitchRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *toggleSwitchRenderer) Destroy() {}
+
+// ToastNotification represents a toast notification
+type ToastNotification struct {
+	widget.BaseWidget
+
+	content   *fyne.Container
+	message   string
+	toastType string // "info", "success", "error", "warning"
+	icon      *widget.Icon
+	label     *widget.Label
+	animation *fyne.Animation
+}
+
+// ShowToast shows a toast notification in the window
+func ShowToast(window fyne.Window, message string, toastType string) {
+
+	// Create toast content
+	var iconResource fyne.Resource
+	var bgColor color.Color
+
+	switch toastType {
+	case "success":
+		iconResource = theme.ConfirmIcon()
+		bgColor = color.RGBA{34, 197, 94, 255}
+	case "error":
+		iconResource = theme.ErrorIcon()
+		bgColor = color.RGBA{255, 85, 85, 255}
+	case "warning":
+		iconResource = theme.WarningIcon()
+		bgColor = color.RGBA{255, 184, 108, 255}
+	default:
+		iconResource = theme.InfoIcon()
+		bgColor = color.RGBA{98, 114, 164, 255}
+	}
+
+	icon := widget.NewIcon(iconResource)
+	label := widget.NewLabel(message)
+	label.TextStyle = fyne.TextStyle{Bold: true}
+
+	// Create background
+	bg := canvas.NewRectangle(bgColor)
+	bg.CornerRadius = 8
+
+	// Create content container
+	content := container.New(
+		layout.NewBorderLayout(nil, nil, icon, nil),
+		icon,
+		label,
+	)
+
+	// Create toast container with padding
+	toastContainer := container.NewStack(
+		bg,
+		container.NewPadded(content),
+	)
+
+	// Position at top of window
+	windowSize := window.Canvas().Size()
+	toastSize := toastContainer.MinSize()
+
+	// Create overlay
+	overlay := container.NewWithoutLayout(toastContainer)
+	toastContainer.Move(fyne.NewPos((windowSize.Width-toastSize.Width)/2, -toastSize.Height))
+	toastContainer.Resize(toastSize)
+
+	// Add to window
+	window.Canvas().Overlays().Add(overlay)
+
+	// Animate in
+	animation := fyne.NewAnimation(300*time.Millisecond, func(progress float32) {
+		y := -toastSize.Height + (toastSize.Height+20)*progress
+		toastContainer.Move(fyne.NewPos((windowSize.Width-toastSize.Width)/2, y))
+	})
+	animation.Curve = fyne.AnimationEaseOut
+	animation.Start()
+
+	// Auto-hide after delay
+	go func() {
+		time.Sleep(3 * time.Second)
+
+		// Animate out
+		outAnimation := fyne.NewAnimation(300*time.Millisecond, func(progress float32) {
+			y := 20 - (toastSize.Height+20)*progress
+			toastContainer.Move(fyne.NewPos((windowSize.Width-toastSize.Width)/2, y))
+			if progress >= 1.0 {
+				window.Canvas().Overlays().Remove(overlay)
+			}
+		})
+		outAnimation.Curve = fyne.AnimationEaseIn
+		outAnimation.Start()
+	}()
+}
+
+// TagChip represents a tag/chip widget
+type TagChip struct {
+	widget.BaseWidget
+
+	Text      string
+	OnDeleted func()
+
+	background *canvas.Rectangle
+	label      *widget.Label
+	deleteBtn  *widget.Button
+	container  *fyne.Container
+}
+
+// NewTagChip creates a new tag chip
+func NewTagChip(text string, onDeleted func()) *TagChip {
+	t := &TagChip{
+		Text:      text,
+		OnDeleted: onDeleted,
+	}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+// CreateRenderer creates the renderer for the tag chip
+func (t *TagChip) CreateRenderer() fyne.WidgetRenderer {
+	t.background = canvas.NewRectangle(color.RGBA{107, 114, 128, 40})
+	t.background.CornerRadius = 12
+
+	t.label = widget.NewLabel(t.Text)
+	t.label.TextStyle = fyne.TextStyle{Bold: true}
+
+	if t.OnDeleted != nil {
+		t.deleteBtn = widget.NewButtonWithIcon("", theme.CancelIcon(), t.OnDeleted)
+		t.deleteBtn.Importance = widget.LowImportance
+
+		t.container = container.NewStack(
+			t.background,
+			container.NewPadded(
+				container.New(
+					layout.NewBorderLayout(nil, nil, nil, t.deleteBtn),
+					t.label,
+					t.deleteBtn,
+				),
+			),
+		)
+	} else {
+		t.container = container.NewStack(
+			t.background,
+			container.NewPadded(t.label),
+		)
+	}
+
+	return widget.NewSimpleRenderer(t.container)
+}
+
+// MouseIn handles mouse enter events
+func (t *TagChip) MouseIn(*desktop.MouseEvent) {
+	t.background.FillColor = color.RGBA{107, 114, 128, 60}
+	t.background.Refresh()
+}
+
+// MouseOut handles mouse leave events
+func (t *TagChip) MouseOut() {
+	t.background.FillColor = color.RGBA{107, 114, 128, 40}
+	t.background.Refresh()
+}
+
+// MouseMoved handles mouse move events
+func (t *TagChip) MouseMoved(*desktop.MouseEvent) {}
+
+// EnhancedProgressBar is a progress bar with percentage display
+type EnhancedProgressBar struct {
+	widget.BaseWidget
+
+	Value       float64
+	ShowPercent bool
+
+	bar       *widget.ProgressBar
+	label     *widget.Label
+	container *fyne.Container
+}
+
+// NewEnhancedProgressBar creates a new enhanced progress bar
+func NewEnhancedProgressBar() *EnhancedProgressBar {
+	p := &EnhancedProgressBar{
+		ShowPercent: true,
+	}
+	p.ExtendBaseWidget(p)
+	return p
+}
+
+// CreateRenderer creates the renderer for the enhanced progress bar
+func (p *EnhancedProgressBar) CreateRenderer() fyne.WidgetRenderer {
+	p.bar = widget.NewProgressBar()
+	p.label = widget.NewLabel("0%")
+	p.label.Alignment = fyne.TextAlignCenter
+
+	p.container = container.NewStack(
+		p.bar,
+		container.NewCenter(p.label),
+	)
+
+	return widget.NewSimpleRenderer(p.container)
+}
+
+// SetValue sets the progress value
+func (p *EnhancedProgressBar) SetValue(value float64) {
+	p.Value = value
+	p.bar.SetValue(value)
+
+	if p.ShowPercent {
+		percent := int(value * 100)
+		p.label.SetText(fmt.Sprintf("%d%%", percent))
+	}
+}
