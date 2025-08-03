@@ -2,6 +2,7 @@ package fynegui
 
 import (
 	"fmt"
+	"image/color"
 	"net/url"
 	"strings"
 	"time"
@@ -12,18 +13,47 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	xtheme "fyne.io/x/fyne/theme"
 
 	"go-toolgit/internal/core/config"
 	"go-toolgit/internal/core/utils"
 	"go-toolgit/internal/gui"
 )
 
+// AdwaitaVariantTheme wraps the Adwaita theme to force a specific variant (light/dark)
+type AdwaitaVariantTheme struct {
+	baseTheme fyne.Theme
+	variant   fyne.ThemeVariant
+}
+
+// Color forces the specific variant instead of using the system default
+func (a *AdwaitaVariantTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color {
+	return a.baseTheme.Color(name, a.variant)
+}
+
+// Font delegates to the base Adwaita theme
+func (a *AdwaitaVariantTheme) Font(style fyne.TextStyle) fyne.Resource {
+	return a.baseTheme.Font(style)
+}
+
+// Icon delegates to the base Adwaita theme
+func (a *AdwaitaVariantTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
+	return a.baseTheme.Icon(name)
+}
+
+// Size delegates to the base Adwaita theme
+func (a *AdwaitaVariantTheme) Size(name fyne.ThemeSizeName) float32 {
+	return a.baseTheme.Size(name)
+}
+
 type FyneApp struct {
-	app     fyne.App
-	window  fyne.Window
-	service *gui.Service
-	logger  *utils.Logger
-	theme   *ModernTheme
+	app         fyne.App
+	window      fyne.Window
+	service     *gui.Service
+	logger      *utils.Logger
+	modernTheme *ModernTheme
+	currentThemeType string // "Modern" or "Adwaita"
+	isDarkMode  bool
 
 	// Current tab
 	currentTab *container.AppTabs
@@ -82,11 +112,13 @@ func NewFyneApp() *FyneApp {
 	service := gui.NewService(cfg, logger)
 
 	return &FyneApp{
-		app:     fyneApp,
-		window:  window,
-		service: service,
-		logger:  logger,
-		theme:   modernTheme.(*ModernTheme),
+		app:              fyneApp,
+		window:           window,
+		service:          service,
+		logger:           logger,
+		modernTheme:      modernTheme.(*ModernTheme),
+		currentThemeType: "Modern",
+		isDarkMode:       true,
 	}
 }
 
@@ -96,27 +128,60 @@ func (f *FyneApp) Run() {
 	f.window.ShowAndRun()
 }
 
-func (f *FyneApp) setupUI() {
-	// Create theme toggle in top-right
-	themeToggle := NewToggleSwitch("Dark Mode", func(dark bool) {
-		f.theme.isDark = dark
-		f.app.Settings().SetTheme(f.theme)
-		
-		// Force refresh of the entire UI
-		f.window.Content().Refresh()
-		
-		// Show feedback to user
-		themeMode := "light"
-		if dark {
-			themeMode = "dark"
+// getCurrentTheme returns the appropriate theme based on current settings
+func (f *FyneApp) getCurrentTheme() fyne.Theme {
+	switch f.currentThemeType {
+	case "Adwaita":
+		variant := theme.VariantLight
+		if f.isDarkMode {
+			variant = theme.VariantDark
 		}
-		ShowToast(f.window, fmt.Sprintf("Switched to %s mode", themeMode), "info")
+		return &AdwaitaVariantTheme{
+			baseTheme: xtheme.AdwaitaTheme(),
+			variant:   variant,
+		}
+	default: // "Modern"
+		f.modernTheme.isDark = f.isDarkMode
+		return f.modernTheme
+	}
+}
+
+// applyTheme applies the current theme to the app
+func (f *FyneApp) applyTheme() {
+	currentTheme := f.getCurrentTheme()
+	f.app.Settings().SetTheme(currentTheme)
+	
+	// Force refresh of the entire UI
+	f.window.Content().Refresh()
+	
+	// Show feedback to user
+	themeMode := "light"
+	if f.isDarkMode {
+		themeMode = "dark"
+	}
+	ShowToast(f.window, fmt.Sprintf("Switched to %s %s theme", f.currentThemeType, themeMode), "info")
+}
+
+func (f *FyneApp) setupUI() {
+	// Create theme selector dropdown
+	themeSelector := widget.NewSelect([]string{"Modern", "Adwaita"}, func(selected string) {
+		f.currentThemeType = selected
+		f.applyTheme()
+	})
+	themeSelector.SetSelected("Modern")
+
+	// Create theme toggle for dark/light mode
+	themeToggle := NewToggleSwitch("Dark Mode", func(dark bool) {
+		f.isDarkMode = dark
+		f.applyTheme()
 	})
 	themeToggle.SetChecked(true) // Start with dark mode
 
 	themeContainer := container.NewHBox(
 		layout.NewSpacer(),
 		widget.NewLabel("Theme:"),
+		themeSelector,
+		widget.NewLabel("Mode:"),
 		themeToggle,
 	)
 
