@@ -11,15 +11,17 @@ import (
 )
 
 type Client struct {
-	client *github.Client
-	config *Config
+	client      *github.Client
+	config      *Config
+	rateLimiter *GitHubRateLimiter
 }
 
 type Config struct {
-	BaseURL    string
-	Token      string
-	Timeout    time.Duration
-	MaxRetries int
+	BaseURL      string
+	Token        string
+	Timeout      time.Duration
+	MaxRetries   int
+	WaitForReset bool // Whether to wait when rate limited
 }
 
 type Repository struct {
@@ -87,13 +89,23 @@ func NewClient(cfg *Config) (*Client, error) {
 	}
 
 	return &Client{
-		client: client,
-		config: cfg,
+		client:      client,
+		config:      cfg,
+		rateLimiter: NewGitHubRateLimiter(cfg.WaitForReset),
 	}, nil
 }
 
 func (c *Client) GetTeam(ctx context.Context, org, teamSlug string) (*Team, error) {
-	team, _, err := c.client.Teams.GetTeamBySlug(ctx, org, teamSlug)
+	// Check rate limit before making request
+	if err := c.rateLimiter.CheckRateLimit(ctx, false); err != nil {
+		return nil, fmt.Errorf("rate limit check failed: %w", err)
+	}
+	
+	team, resp, err := c.client.Teams.GetTeamBySlug(ctx, org, teamSlug)
+	
+	// Update rate limit info from response
+	c.rateLimiter.UpdateFromResponse(resp, false)
+	
 	if err != nil {
 		return nil, fmt.Errorf("failed to get team: %w", err)
 	}
@@ -136,6 +148,11 @@ func (c *Client) ListTeamRepositories(ctx context.Context, teamID int64) ([]*Rep
 }
 
 func (c *Client) CreatePullRequest(ctx context.Context, owner, repo string, pr *PullRequestOptions) (*github.PullRequest, error) {
+	// Check rate limit before making request
+	if err := c.rateLimiter.CheckRateLimit(ctx, false); err != nil {
+		return nil, fmt.Errorf("rate limit check failed: %w", err)
+	}
+	
 	newPR := &github.NewPullRequest{
 		Title: &pr.Title,
 		Head:  &pr.Head,
@@ -143,7 +160,11 @@ func (c *Client) CreatePullRequest(ctx context.Context, owner, repo string, pr *
 		Body:  &pr.Body,
 	}
 
-	pullRequest, _, err := c.client.PullRequests.Create(ctx, owner, repo, newPR)
+	pullRequest, resp, err := c.client.PullRequests.Create(ctx, owner, repo, newPR)
+	
+	// Update rate limit info from response
+	c.rateLimiter.UpdateFromResponse(resp, false)
+	
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pull request: %w", err)
 	}
@@ -198,9 +219,31 @@ func (c *Client) SearchRepositories(ctx context.Context, opts SearchOptions) ([]
 	var allRepos []*Repository
 	
 	for len(allRepos) < maxResults {
+		// Check rate limit before making request
+		if err := c.rateLimiter.CheckRateLimit(ctx, true); err != nil {
+			return nil, fmt.Errorf("rate limit check failed: %w", err)
+		}
+		
 		result, resp, err := c.client.Search.Repositories(ctx, query, searchOpts)
+		
+		// Update rate limit info from response
+		c.rateLimiter.UpdateFromResponse(resp, true)
+		
 		if err != nil {
-			return nil, fmt.Errorf("failed to search repositories: %w", err)
+			// Check if it's a rate limit error
+			if IsRateLimitError(err) && c.config.WaitForReset {
+				// If configured to wait, retry after checking rate limit
+				if err := c.rateLimiter.CheckRateLimit(ctx, true); err != nil {
+					return nil, err
+				}
+				// Retry the request
+				result, resp, err = c.client.Search.Repositories(ctx, query, searchOpts)
+				c.rateLimiter.UpdateFromResponse(resp, true)
+			}
+			
+			if err != nil {
+				return nil, fmt.Errorf("failed to search repositories: %w", err)
+			}
 		}
 
 		for _, repo := range result.Repositories {
@@ -485,4 +528,14 @@ func (c *Client) CreateWebhook(ctx context.Context, owner, repo string, opts *Cr
 	}
 
 	return createdHook, nil
+}
+
+// GetRateLimitInfo returns current GitHub API rate limit information
+func (c *Client) GetRateLimitInfo() RateLimitInfo {
+	return c.rateLimiter.GetRateLimitInfo()
+}
+
+// SetWaitForRateLimitReset configures whether to wait when rate limited
+func (c *Client) SetWaitForRateLimitReset(wait bool) {
+	c.rateLimiter.SetWaitForReset(wait)
 }

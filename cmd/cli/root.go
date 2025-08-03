@@ -56,6 +56,7 @@ func init() {
 	rootCmd.PersistentFlags().String("token", "", "GitHub personal access token")
 	rootCmd.PersistentFlags().String("org", "", "GitHub organization name")
 	rootCmd.PersistentFlags().String("team", "", "GitHub team name")
+	rootCmd.PersistentFlags().Bool("wait-for-rate-limit", true, "Wait when GitHub rate limit is exceeded")
 
 	// Bitbucket flags
 	rootCmd.PersistentFlags().String("bitbucket-url", "", "Bitbucket Server base URL")
@@ -75,6 +76,7 @@ func init() {
 	viper.BindPFlag("github.token", rootCmd.PersistentFlags().Lookup("token"))
 	viper.BindPFlag("github.organization", rootCmd.PersistentFlags().Lookup("org"))
 	viper.BindPFlag("github.team", rootCmd.PersistentFlags().Lookup("team"))
+	viper.BindPFlag("github.wait_for_rate_limit", rootCmd.PersistentFlags().Lookup("wait-for-rate-limit"))
 
 	// Bitbucket bindings
 	viper.BindPFlag("bitbucket.base_url", rootCmd.PersistentFlags().Lookup("bitbucket-url"))

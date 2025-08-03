@@ -124,10 +124,11 @@ func runReplaceSearch(cmd *cobra.Command, args []string) error {
 	}
 
 	githubClient, err := github.NewClient(&github.Config{
-		BaseURL:    cfg.GitHub.BaseURL,
-		Token:      cfg.GitHub.Token,
-		Timeout:    cfg.GitHub.Timeout,
-		MaxRetries: cfg.GitHub.MaxRetries,
+		BaseURL:      cfg.GitHub.BaseURL,
+		Token:        cfg.GitHub.Token,
+		Timeout:      cfg.GitHub.Timeout,
+		MaxRetries:   cfg.GitHub.MaxRetries,
+		WaitForReset: cfg.GitHub.WaitForRateLimit,
 	})
 	if err != nil {
 		githubSpinner.StopWithFailure("Failed to create GitHub client")

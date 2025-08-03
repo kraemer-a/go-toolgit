@@ -17,12 +17,13 @@ type Config struct {
 }
 
 type GitHubConfig struct {
-	BaseURL    string        `yaml:"base_url" mapstructure:"base_url" validate:"required,url"`
-	Token      string        `yaml:"token" mapstructure:"token" validate:"required"`
-	Org        string        `yaml:"organization" mapstructure:"organization" validate:"required"`
-	Team       string        `yaml:"team" mapstructure:"team" validate:"required"`
-	Timeout    time.Duration `yaml:"timeout" mapstructure:"timeout"`
-	MaxRetries int           `yaml:"max_retries" mapstructure:"max_retries"`
+	BaseURL          string        `yaml:"base_url" mapstructure:"base_url" validate:"required,url"`
+	Token            string        `yaml:"token" mapstructure:"token" validate:"required"`
+	Org              string        `yaml:"organization" mapstructure:"organization" validate:"required"`
+	Team             string        `yaml:"team" mapstructure:"team" validate:"required"`
+	Timeout          time.Duration `yaml:"timeout" mapstructure:"timeout"`
+	MaxRetries       int           `yaml:"max_retries" mapstructure:"max_retries"`
+	WaitForRateLimit bool          `yaml:"wait_for_rate_limit" mapstructure:"wait_for_rate_limit"`
 }
 
 type BitbucketConfig struct {

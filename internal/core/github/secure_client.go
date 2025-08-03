@@ -376,3 +376,13 @@ func (sc *SecureClient) WithTimeout(timeout time.Duration) *SecureClient {
 	// For now, return the same client
 	return sc
 }
+
+// GetRateLimitInfo returns current GitHub API rate limit information
+func (sc *SecureClient) GetRateLimitInfo() RateLimitInfo {
+	return sc.client.GetRateLimitInfo()
+}
+
+// SetWaitForRateLimitReset configures whether to wait when rate limited
+func (sc *SecureClient) SetWaitForRateLimitReset(wait bool) {
+	sc.client.SetWaitForRateLimitReset(wait)
+}
