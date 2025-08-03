@@ -430,12 +430,9 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 	rightColumn := repoContainer
 	rightColumn.Resize(fyne.NewSize(500, 400))
 
-	// Create horizontal split layout
-	mainContent := container.New(
-		layout.NewHBoxLayout(),
-		leftColumn,
-		rightColumn,
-	)
+	// Create resizable horizontal split layout
+	mainContent := container.NewHSplit(leftColumn, rightColumn)
+	mainContent.SetOffset(0.55) // Start with left column slightly larger
 
 	return container.New(
 		layout.NewBorderLayout(nil, buttonsContainer, nil, nil),
