@@ -86,6 +86,8 @@ type FyneApp struct {
 	// Status
 	statusLabel *widget.Label
 	statusIcon  *widget.Icon
+	rateLimitStatus *RateLimitStatus
+	operationStatus *OperationStatus
 
 	// Repository data storage
 	repositories []gui.Repository
@@ -129,6 +131,7 @@ func NewFyneApp() *FyneApp {
 func (f *FyneApp) Run() {
 	f.setupUI()
 	f.loadConfigurationFromFile() // Load config and prefill GUI
+	f.startRateLimitRefreshTimer()
 	f.window.ShowAndRun()
 }
 
@@ -196,15 +199,26 @@ func (f *FyneApp) setupUI() {
 		container.NewTabItemWithIcon("Repository Migration", theme.UploadIcon(), f.createMigrationTab()),
 	)
 
-	// Enhanced status bar with icon
+	// Enhanced status bar with icon and rate limit status
 	f.statusLabel = widget.NewLabel("Ready")
 	f.statusLabel.TextStyle = fyne.TextStyle{Bold: true}
+	f.statusLabel.Alignment = fyne.TextAlignCenter
 	f.statusIcon = widget.NewIcon(theme.InfoIcon())
+	
+	// Create rate limit status widget with refresh callback
+	f.rateLimitStatus = NewRateLimitStatus(f.refreshRateLimit)
+	
+	// Create operation status widget
+	f.operationStatus = NewOperationStatus()
 
+	// Create a more compact layout with main status on left, API info on right
+	leftStatus := container.NewHBox(f.statusIcon, container.NewCenter(f.statusLabel))
+	rightStatus := container.NewHBox(f.operationStatus, widget.NewSeparator(), f.rateLimitStatus)
+	
 	statusContent := container.New(
-		layout.NewBorderLayout(nil, nil, f.statusIcon, nil),
-		f.statusIcon,
-		f.statusLabel,
+		layout.NewBorderLayout(nil, nil, leftStatus, rightStatus),
+		leftStatus,
+		rightStatus,
 	)
 
 	statusBar := widget.NewCard("", "", statusContent)
@@ -504,6 +518,7 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 
 func (f *FyneApp) handleValidateConfig() {
 	f.setStatus("Validating configuration...")
+	f.operationStatus.SetOperation(OperationAPIValidation, "Testing GitHub API connection")
 	f.showLoading("Validating configuration...")
 
 	configData := gui.ConfigData{
@@ -532,10 +547,16 @@ func (f *FyneApp) handleValidateConfig() {
 
 		if err != nil {
 			f.setStatusError(fmt.Sprintf("Validation failed: %v", err))
+			f.operationStatus.SetOperation(OperationIdle, "")
 			return
 		}
 
 		f.setStatusSuccess("Configuration validated successfully!")
+		f.operationStatus.SetOperation(OperationIdle, "")
+		
+		// Increment API call counter and refresh rate limit after GitHub API call
+		f.operationStatus.IncrementAPICall()
+		f.refreshRateLimit()
 	}()
 }
 
@@ -629,6 +650,9 @@ func (f *FyneApp) handleMigrationDryRun() {
 			f.displayMigrationSteps(result.Steps)
 		})
 		f.setStatus("Dry run completed successfully!")
+		
+		// Refresh rate limit after GitHub API calls during migration dry run
+		f.refreshRateLimit()
 	}()
 }
 
@@ -653,6 +677,9 @@ func (f *FyneApp) handleStartMigration() {
 		} else {
 			f.setStatus(fmt.Sprintf("Migration failed: %s", result.Message))
 		}
+		
+		// Refresh rate limit after GitHub API calls during migration
+		f.refreshRateLimit()
 	}()
 }
 
@@ -868,38 +895,47 @@ func (f *FyneApp) handleLoadRepositories() {
 
 		f.hideLoading()
 		f.setStatusSuccess(fmt.Sprintf("Loaded %d repositories", len(repos)))
+		
+		// Refresh rate limit after GitHub API call
+		f.refreshRateLimit()
 	}()
 }
 
 func (f *FyneApp) handleValidateReplacement() {
 	f.setStatus("Validating replacement configuration...")
+	f.operationStatus.SetOperation(OperationGitValidation, "Local validation (no API calls)")
 
 	rules := f.collectReplacementRules()
 	if len(rules) == 0 {
 		f.setStatusError("Please add at least one replacement rule")
+		f.operationStatus.SetOperation(OperationIdle, "")
 		return
 	}
 
 	f.setStatus("Replacement configuration is valid!")
+	f.operationStatus.SetOperation(OperationIdle, "")
 }
 
 func (f *FyneApp) handleReplacementDryRun() {
 	f.setStatus("Running replacement dry run...")
+	f.operationStatus.SetOperation(OperationGitClone, "Analyzing repositories using Git (no API limits consumed)")
 
 	rules := f.collectReplacementRules()
 	repos := f.collectSelectedRepositories()
 
 	if len(rules) == 0 {
 		f.setStatusError("Please add at least one replacement rule")
+		f.operationStatus.SetOperation(OperationIdle, "")
 		return
 	}
 
 	if len(repos) == 0 {
 		f.setStatusError("Please select at least one repository")
+		f.operationStatus.SetOperation(OperationIdle, "")
 		return
 	}
 
-	f.showLoading("Analyzing repositories and performing dry run...")
+	f.showLoading("Analyzing repositories using Git cloning (no API limits consumed)...")
 
 	options := gui.ProcessingOptions{
 		DryRun:          true,
@@ -948,11 +984,18 @@ func (f *FyneApp) handleReplacementDryRun() {
 		} else {
 			f.setStatus("Dry run completed! No changes found")
 		}
+		
+		// Reset operation status to idle
+		f.operationStatus.SetOperation(OperationIdle, "")
+		
+		// Refresh rate limit after GitHub API calls during dry run
+		f.refreshRateLimit()
 	}()
 }
 
 func (f *FyneApp) handleProcessReplacements() {
 	f.setStatus("Processing replacements...")
+	f.operationStatus.SetOperation(OperationAPIProcessing, "Creating pull requests (consuming API limits)")
 
 	rules := f.collectReplacementRules()
 	repos := f.collectSelectedRepositories()
@@ -1042,6 +1085,9 @@ func (f *FyneApp) handleProcessReplacements() {
 		} else {
 			f.setStatusError(fmt.Sprintf("Processing failed: %s", result.Message))
 		}
+		
+		// Refresh rate limit after GitHub API calls during processing
+		f.refreshRateLimit()
 	}()
 }
 
@@ -1704,6 +1750,9 @@ func (f *FyneApp) applyChanges(rules []gui.ReplacementRule, repos []gui.Reposito
 		} else {
 			f.setStatusError(fmt.Sprintf("Processing failed: %s", result.Message))
 		}
+		
+		// Refresh rate limit after GitHub API calls during processing
+		f.refreshRateLimit()
 	}()
 }
 
@@ -1812,6 +1861,13 @@ func (f *FyneApp) loadConfigurationFromFile() {
 		f.branchPrefixEntry.SetText(configData.BranchPrefix)
 	}
 
+	// Update the service configuration to initialize GitHub client
+	err = f.service.UpdateConfig(*configData)
+	if err != nil {
+		f.setStatusError(fmt.Sprintf("Failed to initialize GitHub client: %v", err))
+		return
+	}
+
 	f.setStatusSuccess("Configuration loaded from ./config.yaml")
 }
 
@@ -1836,4 +1892,65 @@ func (f *FyneApp) openURL(urlString string) {
 	}
 
 	f.setStatus(fmt.Sprintf("Opened %s in browser", urlString))
+}
+
+// refreshRateLimit fetches and updates rate limit information
+func (f *FyneApp) refreshRateLimit() {
+	if f.service == nil {
+		f.rateLimitStatus.ShowError(fmt.Errorf("service not initialized"))
+		return
+	}
+	
+	// Temporarily show that we're checking rate limits
+	currentOp := f.operationStatus.StatusLabel.Text
+	if currentOp == "Idle" {
+		f.operationStatus.SetOperation(OperationAPIRateLimit, "")
+	}
+	
+	rateLimitInfo, err := f.service.GetRateLimitInfo()
+	if err != nil {
+		f.rateLimitStatus.ShowError(err)
+		if currentOp == "Idle" {
+			f.operationStatus.SetOperation(OperationIdle, "")
+		}
+		return
+	}
+	
+	// Increment API call counter for rate limit check
+	f.operationStatus.IncrementAPICall()
+	
+	// Reset operation status if it was idle before
+	if currentOp == "Idle" {
+		f.operationStatus.SetOperation(OperationIdle, "")
+	}
+	
+	f.rateLimitStatus.UpdateRateLimit(
+		rateLimitInfo.Core.Remaining,
+		rateLimitInfo.Core.Limit,
+		rateLimitInfo.Search.Remaining,
+		rateLimitInfo.Search.Limit,
+		rateLimitInfo.Core.Reset,
+		rateLimitInfo.Search.Reset,
+	)
+}
+
+// startRateLimitRefreshTimer starts a background timer to refresh rate limit information
+func (f *FyneApp) startRateLimitRefreshTimer() {
+	// Initial refresh after a short delay to allow UI setup
+	go func() {
+		time.Sleep(2 * time.Second)
+		fyne.Do(func() {
+			f.refreshRateLimit()
+		})
+		
+		// Set up periodic refresh every 30 seconds
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		
+		for range ticker.C {
+			fyne.Do(func() {
+				f.refreshRateLimit()
+			})
+		}
+	}()
 }

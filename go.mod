@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	fyne.io/fyne/v2 v2.6.2
+	fyne.io/x/fyne v0.0.0-20250418202416-58a230ad1acb
 	github.com/go-git/go-billy/v5 v5.6.2
 	github.com/go-git/go-git/v5 v5.16.2
 	github.com/google/go-github/v66 v66.0.0
@@ -11,14 +12,13 @@ require (
 	github.com/spf13/viper v1.19.0
 	github.com/theckman/yacspin v0.13.12
 	github.com/wailsapp/wails/v2 v2.10.2
-	golang.org/x/oauth2 v0.24.0
+	golang.org/x/oauth2 v0.27.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
 	fyne.io/systray v1.11.0 // indirect
-	fyne.io/x/fyne v0.0.0-20250418202416-58a230ad1acb // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect

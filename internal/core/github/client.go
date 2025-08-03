@@ -535,6 +535,34 @@ func (c *Client) GetRateLimitInfo() RateLimitInfo {
 	return c.rateLimiter.GetRateLimitInfo()
 }
 
+// GetLiveRateLimitInfo fetches current rate limit information from GitHub API
+func (c *Client) GetLiveRateLimitInfo(ctx context.Context) (RateLimitInfo, error) {
+	rateLimits, _, err := c.client.RateLimit.Get(ctx)
+	if err != nil {
+		// Return cached info if API call fails
+		return c.rateLimiter.GetRateLimitInfo(), err
+	}
+
+	// Convert GitHub API response to our RateLimitInfo format
+	info := RateLimitInfo{
+		Core: RateInfo{
+			Limit:     rateLimits.Core.Limit,
+			Remaining: rateLimits.Core.Remaining,
+			Reset:     rateLimits.Core.Reset.Time,
+		},
+		Search: RateInfo{
+			Limit:     rateLimits.Search.Limit,
+			Remaining: rateLimits.Search.Remaining,
+			Reset:     rateLimits.Search.Reset.Time,
+		},
+	}
+
+	// Update our internal rate limiter with fresh data
+	c.rateLimiter.UpdateFromRateLimitResponse(rateLimits)
+
+	return info, nil
+}
+
 // SetWaitForRateLimitReset configures whether to wait when rate limited
 func (c *Client) SetWaitForRateLimitReset(wait bool) {
 	c.rateLimiter.SetWaitForReset(wait)

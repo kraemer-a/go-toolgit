@@ -1697,3 +1697,22 @@ func (s *Service) ValidateMigrationConfig(config MigrationConfig) error {
 
 	return nil
 }
+
+// GetRateLimitInfo returns GitHub API rate limit information
+func (s *Service) GetRateLimitInfo() (*github.RateLimitInfo, error) {
+	if s.github == nil {
+		return nil, fmt.Errorf("GitHub client not initialized")
+	}
+	
+	// Try to get live rate limit information from GitHub API
+	ctx := context.Background()
+	info, err := s.github.GetLiveRateLimitInfo(ctx)
+	if err != nil {
+		// Fall back to cached information if live fetch fails
+		s.logger.Debug("Failed to fetch live rate limits, using cached data", "error", err)
+		cached := s.github.GetRateLimitInfo()
+		return &cached, nil
+	}
+	
+	return &info, nil
+}
