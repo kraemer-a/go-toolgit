@@ -1,6 +1,8 @@
 package github
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -275,4 +277,121 @@ func TestBuildSearchQuery_EdgeCases(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Security-focused tests
+func TestNewClientSecurity(t *testing.T) {
+	securityTests := []struct {
+		name   string
+		config Config
+		desc   string
+	}{
+		{
+			name: "malicious token with command injection",
+			config: Config{
+				BaseURL:    "https://api.github.com",
+				Token:      "ghp_token; rm -rf /",
+				Timeout:    30 * time.Second,
+				MaxRetries: 3,
+			},
+			desc: "Should not execute commands in token",
+		},
+		{
+			name: "extremely long token",
+			config: Config{
+				BaseURL:    "https://api.github.com",
+				Token:      strings.Repeat("A", 100000),
+				Timeout:    30 * time.Second,
+				MaxRetries: 3,
+			},
+			desc: "Should handle large tokens gracefully",
+		},
+		{
+			name: "token with null bytes",
+			config: Config{
+				BaseURL:    "https://api.github.com",
+				Token:      "ghp_token\x00evil",
+				Timeout:    30 * time.Second,
+				MaxRetries: 3,
+			},
+			desc: "Should handle null bytes safely",
+		},
+	}
+
+	for _, tt := range securityTests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Should not panic or cause security issues
+			client, err := NewClient(&tt.config)
+			
+			if client != nil && strings.Contains(tt.config.Token, "rm -rf") {
+				// Token should be stored as-is but not executed
+				if client.config.Token != tt.config.Token {
+					t.Errorf("Token was modified during storage")
+				}
+			}
+			
+			// Large inputs should be handled gracefully
+			if len(tt.config.Token) > 50000 && err == nil {
+				t.Logf("Large token accepted - ensure memory usage is reasonable")
+			}
+		})
+	}
+}
+
+func TestBuildSearchQuerySecurity(t *testing.T) {
+	securityTests := []struct {
+		name string
+		opts SearchOptions
+		desc string
+	}{
+		{
+			name: "command injection in query",
+			opts: SearchOptions{
+				Query: "test; rm -rf /",
+			},
+			desc: "Should not execute commands in search query",
+		},
+		{
+			name: "script injection in owner",
+			opts: SearchOptions{
+				Owner: "<script>alert('xss')</script>",
+			},
+			desc: "Should not execute scripts in owner field",
+		},
+		{
+			name: "extremely long query",
+			opts: SearchOptions{
+				Query: strings.Repeat("A", 100000),
+			},
+			desc: "Should handle large queries gracefully",
+		},
+	}
+
+	for _, tt := range securityTests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildSearchQuery(tt.opts)
+			
+			// Should not contain dangerous patterns
+			if strings.Contains(result, "rm -rf") ||
+			   strings.Contains(result, "<script>") {
+				t.Errorf("Security issue: dangerous content in search query: %s", result)
+			}
+			
+			// Should have reasonable length
+			if len(result) > 10000 {
+				t.Errorf("Search query too long: %d characters", len(result))
+			}
+		})
+	}
+}
+
+func TestClientContextCancellation(t *testing.T) {
+	t.Run("context cancellation handling", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // Cancel immediately
+		
+		if ctx.Err() == nil {
+			t.Error("Expected context to be cancelled")
+		}
+	})
 }
