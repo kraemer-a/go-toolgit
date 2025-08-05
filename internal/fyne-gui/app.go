@@ -506,6 +506,9 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 	addTeamBtn := widget.NewButton("Add Team", f.handleAddTeam)
 
 	// Migration buttons
+	saveMigrationBtn := widget.NewButtonWithIcon("Save Configuration", theme.DocumentSaveIcon(), f.handleSaveMigrationConfig)
+	saveMigrationBtn.Importance = widget.MediumImportance
+
 	validateMigrationBtn := widget.NewButton("Validate Migration", f.handleValidateMigration)
 	validateMigrationBtn.Importance = widget.MediumImportance
 
@@ -532,6 +535,7 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 
 	buttonsContainer := container.New(
 		layout.NewHBoxLayout(),
+		saveMigrationBtn,
 		validateMigrationBtn,
 		dryRunBtn,
 		migrateBtn,
@@ -622,12 +626,92 @@ func (f *FyneApp) handleSaveConfig() {
 	}()
 }
 
+func (f *FyneApp) handleSaveMigrationConfig() {
+	f.setStatus("Saving migration configuration...")
+	f.showLoading("Saving migration configuration...")
+	
+	// Collect current base configuration data
+	configData := ConfigData{
+		Provider:        f.providerSelect.Selected,
+		GitHubURL:       f.githubURLEntry.Text,
+		Token:           f.tokenEntry.Text,
+		Organization:    f.orgEntry.Text,
+		Team:            f.teamEntry.Text,
+		IncludePatterns: f.includePatternEditor.GetPatterns(),
+		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
+		PRTitleTemplate: f.prTitleEntry.Text,
+		PRBodyTemplate:  f.prBodyEntry.Text,
+		BranchPrefix:    f.branchPrefixEntry.Text,
+	}
+	
+	// Add migration data
+	migrationConfig := f.collectMigrationConfig()
+	configData.MigrationSourceURL = migrationConfig.SourceBitbucketURL
+	configData.MigrationTargetOrg = migrationConfig.TargetGitHubOrg
+	configData.MigrationTargetRepo = migrationConfig.TargetRepositoryName
+	configData.MigrationWebhookURL = migrationConfig.WebhookURL
+	configData.MigrationTeams = migrationConfig.Teams
+	
+	// Debug: Log what we're about to save
+	f.logger.Info("Saving migration config", 
+		"source_url", configData.MigrationSourceURL,
+		"target_org", configData.MigrationTargetOrg,
+		"target_repo", configData.MigrationTargetRepo,
+		"webhook_url", configData.MigrationWebhookURL,
+		"teams", configData.MigrationTeams)
+	
+	go func() {
+		err := f.service.SaveConfig(configData)
+		f.hideLoading()
+		if err != nil {
+			f.setStatusError(fmt.Sprintf("Failed to save migration configuration: %v", err))
+			return
+		}
+		f.setStatusSuccess("Migration configuration saved successfully!")
+	}()
+}
+
 func (f *FyneApp) handleAddTeam() {
 	teamNameEntry := widget.NewEntry()
 	teamNameEntry.SetPlaceHolder("team-name")
 
 	permissionSelect := widget.NewSelect([]string{"pull", "push", "maintain", "admin"}, nil)
 	permissionSelect.Selected = "pull"
+
+	removeBtn := widget.NewButton("Remove", func() {
+		// This will be set when the container is created
+	})
+	removeBtn.Importance = widget.DangerImportance
+
+	// Create a container with more control over sizing
+	rightControls := container.New(
+		layout.NewHBoxLayout(),
+		permissionSelect,
+		removeBtn,
+	)
+	
+	// Use BorderLayout to give the team entry more space
+	teamContainer := container.New(
+		layout.NewBorderLayout(nil, nil, nil, rightControls),
+		rightControls,
+		teamNameEntry, // This will take up remaining space
+	)
+
+	// Set the remove function to remove this specific container
+	removeBtn.OnTapped = func() {
+		f.teamsContainer.Remove(teamContainer)
+	}
+
+	f.teamsContainer.Add(teamContainer)
+}
+
+func (f *FyneApp) addTeamFromConfig(teamName, permission string) {
+	teamNameEntry := widget.NewEntry()
+	teamNameEntry.SetPlaceHolder("team-name")
+	teamNameEntry.SetText(teamName)
+
+	permissionSelect := widget.NewSelect([]string{"pull", "push", "maintain", "admin"}, nil)
+	permissionSelect.Selected = permission
 
 	removeBtn := widget.NewButton("Remove", func() {
 		// This will be set when the container is created
@@ -725,14 +809,38 @@ func (f *FyneApp) handleStartMigration() {
 func (f *FyneApp) collectMigrationConfig() MigrationConfig {
 	teams := make(map[string]string)
 
-	// Collect teams from UI
+	// Collect teams from UI - updated for new BorderLayout structure
 	for _, obj := range f.teamsContainer.Objects {
-		if container, ok := obj.(*fyne.Container); ok && len(container.Objects) >= 2 {
-			if teamEntry, ok := container.Objects[0].(*widget.Entry); ok {
-				if permissionSelect, ok := container.Objects[1].(*widget.Select); ok {
-					if teamEntry.Text != "" && permissionSelect.Selected != "" {
-						teams[teamEntry.Text] = permissionSelect.Selected
+		if teamContainer, ok := obj.(*fyne.Container); ok && len(teamContainer.Objects) >= 2 {
+			// New structure: teamContainer has rightControls and teamNameEntry
+			var teamEntry *widget.Entry
+			var permissionSelect *widget.Select
+			
+			// Find the team entry (it's the standalone object, not in rightControls)
+			for _, containerObj := range teamContainer.Objects {
+				if entry, ok := containerObj.(*widget.Entry); ok {
+					teamEntry = entry
+					break
+				}
+			}
+			
+			// Find the permission select (it's inside rightControls container)
+			for _, containerObj := range teamContainer.Objects {
+				if rightControls, ok := containerObj.(*fyne.Container); ok {
+					// Look inside rightControls for the select widget
+					for _, rightObj := range rightControls.Objects {
+						if selectWidget, ok := rightObj.(*widget.Select); ok {
+							permissionSelect = selectWidget
+							break
+						}
 					}
+				}
+			}
+			
+			// If we found both widgets, add the team
+			if teamEntry != nil && permissionSelect != nil {
+				if teamEntry.Text != "" && permissionSelect.Selected != "" {
+					teams[teamEntry.Text] = permissionSelect.Selected
 				}
 			}
 		}
@@ -1978,6 +2086,21 @@ func (f *FyneApp) loadConfigurationFromFile() {
 	}
 	if configData.BranchPrefix != "" {
 		f.branchPrefixEntry.SetText(configData.BranchPrefix)
+	}
+
+	// Prefill migration fields (always set, even if empty to allow clearing)
+	f.sourceURLEntry.SetText(configData.MigrationSourceURL)
+	f.targetOrgEntry.SetText(configData.MigrationTargetOrg)
+	f.targetRepoEntry.SetText(configData.MigrationTargetRepo)
+	f.webhookURLEntry.SetText(configData.MigrationWebhookURL)
+	
+	// Prefill migration teams (always clear and reload to sync with config)
+	f.teamsContainer.RemoveAll()
+	if len(configData.MigrationTeams) > 0 {
+		// Add teams from config
+		for teamName, permission := range configData.MigrationTeams {
+			f.addTeamFromConfig(teamName, permission)
+		}
 	}
 
 	// Update the service configuration to initialize GitHub client

@@ -171,7 +171,7 @@ type ToastNotification struct {
 	animation *fyne.Animation
 }
 
-// ShowToast shows a toast notification in the window
+// ShowToast shows a toast notification without blocking the main window
 func ShowToast(window fyne.Window, message string, toastType string) {
 
 	// Create toast content
@@ -181,23 +181,23 @@ func ShowToast(window fyne.Window, message string, toastType string) {
 	switch toastType {
 	case "success":
 		iconResource = theme.ConfirmIcon()
-		bgColor = color.RGBA{34, 197, 94, 220} // Slightly transparent
+		bgColor = color.RGBA{34, 197, 94, 240} // More opaque for visibility
 	case "error":
 		iconResource = theme.ErrorIcon()
-		bgColor = color.RGBA{255, 85, 85, 220}
+		bgColor = color.RGBA{255, 85, 85, 240}
 	case "warning":
 		iconResource = theme.WarningIcon()
-		bgColor = color.RGBA{255, 184, 108, 220}
+		bgColor = color.RGBA{255, 184, 108, 240}
 	default:
 		iconResource = theme.InfoIcon()
-		bgColor = color.RGBA{98, 114, 164, 220}
+		bgColor = color.RGBA{98, 114, 164, 240}
 	}
 
 	icon := widget.NewIcon(iconResource)
 	label := widget.NewLabel(message)
 	label.TextStyle = fyne.TextStyle{Bold: true}
 
-	// Create background with drop shadow effect
+	// Create background with rounded corners
 	bg := canvas.NewRectangle(bgColor)
 	bg.CornerRadius = 8
 
@@ -208,38 +208,43 @@ func ShowToast(window fyne.Window, message string, toastType string) {
 		label,
 	)
 
-	// Create a minimal overlay that only covers the toast area (declare early for scope)
-	overlay := container.NewWithoutLayout()
-
-	// Create a tappable button for click-to-dismiss functionality
-	dismissButton := widget.NewButton("", func() {
-		// Remove overlay immediately when clicked
-		window.Canvas().Overlays().Remove(overlay)
-	})
-	dismissButton.Importance = widget.LowImportance
-
 	// Create toast container with padding
 	toastContainer := container.NewStack(
 		bg,
 		container.NewPadded(content),
-		dismissButton, // Invisible button overlay for clicking
 	)
 
 	// Calculate positioning - move to top-center for better visibility
 	windowSize := window.Canvas().Size()
 	toastSize := fyne.NewSize(300, 60) // Fixed size for consistency
-	toastContainer.Resize(toastSize)
-	
-	// Position in top-center with margin
 	margin := float32(20)
 	finalX := (windowSize.Width - toastSize.Width) / 2 // Center horizontally
 	finalY := margin                                    // Top with margin
 	startY := -toastSize.Height                        // Start above window
 
-	// Add toast to overlay
-	overlay.Add(toastContainer)
+	// Create a tappable button for click-to-dismiss functionality
+	dismissButton := widget.NewButton("", func() {
+		// This will be set after overlay is created
+	})
+	dismissButton.Importance = widget.LowImportance
+
+	// Update the toast container to include the dismiss button
+	toastContainer = container.NewStack(
+		bg,
+		container.NewPadded(content),
+		dismissButton, // Invisible button overlay for clicking the toast
+	)
 	
-	// Position the toast initially off-screen (above)
+	// Create minimal overlay using NewWithoutLayout and only add the toast
+	overlay := container.NewWithoutLayout(toastContainer)
+	
+	// Set up dismiss button callback now that overlay exists
+	dismissButton.OnTapped = func() {
+		window.Canvas().Overlays().Remove(overlay)
+	}
+
+	// Size and position the toast container
+	toastContainer.Resize(toastSize)
 	toastContainer.Move(fyne.NewPos(finalX, startY))
 
 	// Add to window overlays
@@ -253,9 +258,9 @@ func ShowToast(window fyne.Window, message string, toastType string) {
 	animation.Curve = fyne.AnimationEaseOut
 	animation.Start()
 
-	// Auto-hide after delay (reduced to 2.5 seconds)
+	// Auto-hide after delay (reduced to 1.5 seconds)
 	go func() {
-		time.Sleep(2500 * time.Millisecond)
+		time.Sleep(1500 * time.Millisecond)
 
 		// Animate out to top (slide up)
 		outAnimation := fyne.NewAnimation(250*time.Millisecond, func(progress float32) {

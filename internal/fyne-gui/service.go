@@ -74,6 +74,13 @@ type ConfigData struct {
 	PRTitleTemplate string   `json:"pr_title_template"`
 	PRBodyTemplate  string   `json:"pr_body_template"`
 	BranchPrefix    string   `json:"branch_prefix"`
+	
+	// Migration settings
+	MigrationSourceURL   string            `json:"migration_source_url,omitempty"`
+	MigrationTargetOrg   string            `json:"migration_target_org,omitempty"`
+	MigrationTargetRepo  string            `json:"migration_target_repo,omitempty"`
+	MigrationWebhookURL  string            `json:"migration_webhook_url,omitempty"`
+	MigrationTeams       map[string]string `json:"migration_teams,omitempty"`
 }
 
 // MigrationConfig holds configuration for repository migration
@@ -136,21 +143,17 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 	viper.Set("pull_request.body_template", configData.PRBodyTemplate)
 	viper.Set("pull_request.branch_prefix", configData.BranchPrefix)
 	
-	// Check if config file already exists
-	if viper.ConfigFileUsed() != "" {
-		// Config file exists, update it
-		if err := viper.WriteConfig(); err != nil {
-			return fmt.Errorf("failed to update config file: %w", err)
-		}
-		return nil
-	}
+	// Save migration settings (always set, even if empty to allow clearing)
+	viper.Set("migration.source_url", configData.MigrationSourceURL)
+	viper.Set("migration.target_org", configData.MigrationTargetOrg)
+	viper.Set("migration.target_repo", configData.MigrationTargetRepo)
+	viper.Set("migration.webhook_url", configData.MigrationWebhookURL)
+	viper.Set("migration.teams", configData.MigrationTeams)
 	
-	// No config file exists, try to create one
-	// First try current directory
+	// Always try current directory first
 	currentDirConfig := "./config.yaml"
 	if err := viper.WriteConfigAs(currentDirConfig); err == nil {
-		// Successfully created in current directory
-		s.logger.Info("Created config file in current directory", "path", currentDirConfig)
+		s.logger.Info("Saved config to current directory", "path", currentDirConfig)
 		return nil
 	}
 	
@@ -170,7 +173,7 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 	
-	s.logger.Info("Created config file in home directory", "path", configPath)
+	s.logger.Info("Saved config to home directory", "path", configPath)
 	return nil
 }
 
@@ -547,6 +550,13 @@ func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 		PRTitleTemplate: cfg.PullRequest.TitleTemplate,
 		PRBodyTemplate:  cfg.PullRequest.BodyTemplate,
 		BranchPrefix:    cfg.PullRequest.BranchPrefix,
+		
+		// Load migration settings from viper if they exist
+		MigrationSourceURL:   viper.GetString("migration.source_url"),
+		MigrationTargetOrg:   viper.GetString("migration.target_org"),
+		MigrationTargetRepo:  viper.GetString("migration.target_repo"),
+		MigrationWebhookURL:  viper.GetString("migration.webhook_url"),
+		MigrationTeams:       viper.GetStringMapString("migration.teams"),
 	}, nil
 }
 
