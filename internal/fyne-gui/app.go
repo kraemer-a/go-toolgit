@@ -1478,59 +1478,24 @@ func (f *FyneApp) formatDiffHunks(diffContent string) string {
 	return f.aggressiveFilterDiff(diffContent)
 }
 
-// aggressiveFilterDiff aggressively filters diff to show only essential changes
+// aggressiveFilterDiff filters diff content while preserving structure
 func (f *FyneApp) aggressiveFilterDiff(diffContent string) string {
+	// Simply return the original diff content to preserve structure
+	// The generateDiffFromFileChange already creates a proper, concise diff
 	lines := strings.Split(diffContent, "\n")
-	var result []string
-	const maxLines = 20
-
-	// Count actual changes first
-	var addedLines, removedLines, hunkHeaders []string
-	for _, line := range lines {
-		if strings.HasPrefix(line, "@@") {
-			hunkHeaders = append(hunkHeaders, line)
-		} else if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			addedLines = append(addedLines, line)
-		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			removedLines = append(removedLines, line)
-		}
+	const maxLines = 100 // Allow more lines to show meaningful diffs
+	
+	// If the diff is too long, truncate but preserve structure
+	if len(lines) > maxLines {
+		var result []string
+		result = append(result, lines[:maxLines]...)
+		result = append(result, "")
+		result = append(result, fmt.Sprintf("... [Truncated - showing first %d lines of %d total] ...", maxLines, len(lines)))
+		return strings.Join(result, "\n")
 	}
-
-	// Add a concise summary
-	result = append(result, fmt.Sprintf("diff --git a/file b/file"))
-	result = append(result, fmt.Sprintf("@@ Summary: %d hunks, +%d, -%d @@", len(hunkHeaders), len(addedLines), len(removedLines)))
-	result = append(result, "")
-
-	// Add essential content only
-	lineCount := 0
-	for _, header := range hunkHeaders {
-		if lineCount >= maxLines {
-			result = append(result, "+++ [truncated - too many changes]")
-			break
-		}
-		result = append(result, header)
-		lineCount++
-	}
-
-	for _, line := range removedLines {
-		if lineCount >= maxLines {
-			result = append(result, "+++ [truncated - too many changes]")
-			break
-		}
-		result = append(result, line)
-		lineCount++
-	}
-
-	for _, line := range addedLines {
-		if lineCount >= maxLines {
-			result = append(result, "+++ [truncated - too many changes]")
-			break
-		}
-		result = append(result, line)
-		lineCount++
-	}
-
-	return strings.Join(result, "\n")
+	
+	// Return original diff content to preserve proper structure
+	return diffContent
 }
 
 // extractEssentialDiff extracts only the essential diff parts when parsing fails
