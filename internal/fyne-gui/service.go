@@ -136,31 +136,41 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 	viper.Set("pull_request.body_template", configData.PRBodyTemplate)
 	viper.Set("pull_request.branch_prefix", configData.BranchPrefix)
 	
-	// Try to write the configuration
-	if err := viper.WriteConfig(); err != nil {
-		// If the config file doesn't exist, try to create it
-		if os.IsNotExist(err) {
-			// Create config directory if it doesn't exist
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("failed to get home directory: %w", err)
-			}
-			
-			configDir := filepath.Join(home, ".go-toolgit")
-			if err := os.MkdirAll(configDir, 0755); err != nil {
-				return fmt.Errorf("failed to create config directory: %w", err)
-			}
-			
-			// Write config to the new file
-			configPath := filepath.Join(configDir, "config.yaml")
-			if err := viper.WriteConfigAs(configPath); err != nil {
-				return fmt.Errorf("failed to write config file: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to write config: %w", err)
+	// Check if config file already exists
+	if viper.ConfigFileUsed() != "" {
+		// Config file exists, update it
+		if err := viper.WriteConfig(); err != nil {
+			return fmt.Errorf("failed to update config file: %w", err)
 		}
+		return nil
 	}
 	
+	// No config file exists, try to create one
+	// First try current directory
+	currentDirConfig := "./config.yaml"
+	if err := viper.WriteConfigAs(currentDirConfig); err == nil {
+		// Successfully created in current directory
+		s.logger.Info("Created config file in current directory", "path", currentDirConfig)
+		return nil
+	}
+	
+	// Current directory failed, try home directory
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	
+	configDir := filepath.Join(home, ".go-toolgit")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	
+	configPath := filepath.Join(configDir, "config.yaml")
+	if err := viper.WriteConfigAs(configPath); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	
+	s.logger.Info("Created config file in home directory", "path", configPath)
 	return nil
 }
 
