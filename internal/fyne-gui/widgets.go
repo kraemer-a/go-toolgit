@@ -181,23 +181,23 @@ func ShowToast(window fyne.Window, message string, toastType string) {
 	switch toastType {
 	case "success":
 		iconResource = theme.ConfirmIcon()
-		bgColor = color.RGBA{34, 197, 94, 255}
+		bgColor = color.RGBA{34, 197, 94, 220} // Slightly transparent
 	case "error":
 		iconResource = theme.ErrorIcon()
-		bgColor = color.RGBA{255, 85, 85, 255}
+		bgColor = color.RGBA{255, 85, 85, 220}
 	case "warning":
 		iconResource = theme.WarningIcon()
-		bgColor = color.RGBA{255, 184, 108, 255}
+		bgColor = color.RGBA{255, 184, 108, 220}
 	default:
 		iconResource = theme.InfoIcon()
-		bgColor = color.RGBA{98, 114, 164, 255}
+		bgColor = color.RGBA{98, 114, 164, 220}
 	}
 
 	icon := widget.NewIcon(iconResource)
 	label := widget.NewLabel(message)
 	label.TextStyle = fyne.TextStyle{Bold: true}
 
-	// Create background
+	// Create background with drop shadow effect
 	bg := canvas.NewRectangle(bgColor)
 	bg.CornerRadius = 8
 
@@ -208,40 +208,59 @@ func ShowToast(window fyne.Window, message string, toastType string) {
 		label,
 	)
 
+	// Create a minimal overlay that only covers the toast area (declare early for scope)
+	overlay := container.NewWithoutLayout()
+
+	// Create a tappable button for click-to-dismiss functionality
+	dismissButton := widget.NewButton("", func() {
+		// Remove overlay immediately when clicked
+		window.Canvas().Overlays().Remove(overlay)
+	})
+	dismissButton.Importance = widget.LowImportance
+
 	// Create toast container with padding
 	toastContainer := container.NewStack(
 		bg,
 		container.NewPadded(content),
+		dismissButton, // Invisible button overlay for clicking
 	)
 
-	// Position at top of window
+	// Calculate positioning - move to bottom-right to avoid blocking main UI
 	windowSize := window.Canvas().Size()
-	toastSize := toastContainer.MinSize()
-
-	// Create overlay
-	overlay := container.NewWithoutLayout(toastContainer)
-	toastContainer.Move(fyne.NewPos((windowSize.Width-toastSize.Width)/2, -toastSize.Height))
+	toastSize := fyne.NewSize(300, 60) // Fixed size for consistency
 	toastContainer.Resize(toastSize)
+	
+	// Position in bottom-right corner with margin
+	margin := float32(20)
+	finalX := windowSize.Width - toastSize.Width - margin
+	finalY := windowSize.Height - toastSize.Height - margin
+	startY := windowSize.Height + toastSize.Height // Start below window
 
-	// Add to window
+	// Add toast to overlay
+	overlay.Add(toastContainer)
+	
+	// Position the toast initially off-screen (bottom)
+	toastContainer.Move(fyne.NewPos(finalX, startY))
+
+	// Add to window overlays
 	window.Canvas().Overlays().Add(overlay)
 
-	// Animate in
-	animation := fyne.NewAnimation(300*time.Millisecond, func(progress float32) {
-		y := -toastSize.Height + (toastSize.Height+20)*progress
-		toastContainer.Move(fyne.NewPos((windowSize.Width-toastSize.Width)/2, y))
+	// Animate in from bottom
+	animation := fyne.NewAnimation(250*time.Millisecond, func(progress float32) {
+		y := startY - (startY-finalY)*progress
+		toastContainer.Move(fyne.NewPos(finalX, y))
 	})
 	animation.Curve = fyne.AnimationEaseOut
 	animation.Start()
 
-	// Auto-hide after delay
+	// Auto-hide after delay (reduced to 2.5 seconds)
 	go func() {
-		time.Sleep(3 * time.Second)
+		time.Sleep(2500 * time.Millisecond)
 
-		// Animate out
-		outAnimation := fyne.NewAnimation(300*time.Millisecond, func(progress float32) {
-			y := 20 - (toastSize.Height+20)*progress
-			toastContainer.Move(fyne.NewPos((windowSize.Width-toastSize.Width)/2, y))
+		// Animate out to bottom
+		outAnimation := fyne.NewAnimation(250*time.Millisecond, func(progress float32) {
+			y := finalY + (startY-finalY)*progress
+			toastContainer.Move(fyne.NewPos(finalX, y))
 			if progress >= 1.0 {
 				window.Canvas().Overlays().Remove(overlay)
 			}
