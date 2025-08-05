@@ -634,11 +634,18 @@ func (f *FyneApp) handleAddTeam() {
 	})
 	removeBtn.Importance = widget.DangerImportance
 
-	teamContainer := container.New(
+	// Create a container with more control over sizing
+	rightControls := container.New(
 		layout.NewHBoxLayout(),
-		teamNameEntry,
 		permissionSelect,
 		removeBtn,
+	)
+	
+	// Use BorderLayout to give the team entry more space
+	teamContainer := container.New(
+		layout.NewBorderLayout(nil, nil, nil, rightControls),
+		rightControls,
+		teamNameEntry, // This will take up remaining space
 	)
 
 	// Set the remove function to remove this specific container
