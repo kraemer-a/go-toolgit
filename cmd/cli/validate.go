@@ -118,7 +118,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	repositories, err := githubClient.ListTeamRepositories(ctx, team.ID)
+	repositories, err := githubClient.ListTeamRepositories(ctx, team)
 	if err != nil {
 		spinner.StopWithFailure("Failed to list team repositories")
 		return utils.NewNetworkError("failed to list team repositories", err)

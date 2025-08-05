@@ -90,7 +90,7 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	spinner.UpdateMessage("Fetching team repositories")
 
-	repositories, err := githubClient.ListTeamRepositories(ctx, team.ID)
+	repositories, err := githubClient.ListTeamRepositories(ctx, team)
 	if err != nil {
 		spinner.StopWithFailure("Failed to list team repositories")
 		return utils.NewNetworkError("failed to list team repositories", err)

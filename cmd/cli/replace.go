@@ -136,7 +136,7 @@ func runReplace(cmd *cobra.Command, args []string) error {
 
 	githubSpinner.UpdateMessage("Listing team repositories")
 
-	repositories, err := githubClient.ListTeamRepositories(ctx, team.ID)
+	repositories, err := githubClient.ListTeamRepositories(ctx, team)
 	if err != nil {
 		githubSpinner.StopWithFailure("Failed to list team repositories")
 		return utils.NewNetworkError("failed to list team repositories", err)

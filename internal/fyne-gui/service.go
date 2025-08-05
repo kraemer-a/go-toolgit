@@ -207,7 +207,7 @@ func (s *Service) ListRepositories() ([]Repository, error) {
 		}
 
 		// Get team repositories
-		repos, err = s.githubClient.ListTeamRepositories(ctx, team.ID)
+		repos, err = s.githubClient.ListTeamRepositories(ctx, team)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list team repositories: %w", err)
 		}

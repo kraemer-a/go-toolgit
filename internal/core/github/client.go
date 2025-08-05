@@ -34,9 +34,10 @@ type Repository struct {
 }
 
 type Team struct {
-	ID   int64
-	Name string
-	Slug string
+	ID    int64
+	OrgID int64
+	Name  string
+	Slug  string
 }
 
 type TreeEntry struct {
@@ -110,19 +111,35 @@ func (c *Client) GetTeam(ctx context.Context, org, teamSlug string) (*Team, erro
 		return nil, fmt.Errorf("failed to get team: %w", err)
 	}
 
+	// Extract organization ID from the team's organization
+	orgID := int64(0)
+	if team.Organization != nil {
+		orgID = team.Organization.GetID()
+	}
+
 	return &Team{
-		ID:   team.GetID(),
-		Name: team.GetName(),
-		Slug: team.GetSlug(),
+		ID:    team.GetID(),
+		OrgID: orgID,
+		Name:  team.GetName(),
+		Slug:  team.GetSlug(),
 	}, nil
 }
 
-func (c *Client) ListTeamRepositories(ctx context.Context, teamID int64) ([]*Repository, error) {
+func (c *Client) ListTeamRepositories(ctx context.Context, team *Team) ([]*Repository, error) {
 	opt := &github.ListOptions{PerPage: 100}
 	var allRepos []*Repository
 
 	for {
-		repos, resp, err := c.client.Teams.ListTeamReposByID(ctx, teamID, teamID, opt)
+		// Check rate limit before making request
+		if err := c.rateLimiter.CheckRateLimit(ctx, false); err != nil {
+			return nil, fmt.Errorf("rate limit check failed: %w", err)
+		}
+		
+		repos, resp, err := c.client.Teams.ListTeamReposByID(ctx, team.OrgID, team.ID, opt)
+		
+		// Update rate limit info from response
+		c.rateLimiter.UpdateFromResponse(resp, false)
+		
 		if err != nil {
 			return nil, fmt.Errorf("failed to list team repositories: %w", err)
 		}

@@ -81,12 +81,18 @@ func (sc *SecureClient) GetTeam(ctx context.Context, org, teamSlug string) (*Tea
 }
 
 // ListTeamRepositories lists repositories for a team with validation
-func (sc *SecureClient) ListTeamRepositories(ctx context.Context, teamID int64) ([]*Repository, error) {
-	if teamID <= 0 {
+func (sc *SecureClient) ListTeamRepositories(ctx context.Context, team *Team) ([]*Repository, error) {
+	if team == nil {
+		return nil, fmt.Errorf("team cannot be nil")
+	}
+	if team.ID <= 0 {
 		return nil, fmt.Errorf("invalid team ID: must be positive")
 	}
+	if team.OrgID <= 0 {
+		return nil, fmt.Errorf("invalid organization ID: must be positive")
+	}
 	
-	return sc.client.ListTeamRepositories(ctx, teamID)
+	return sc.client.ListTeamRepositories(ctx, team)
 }
 
 // CreatePullRequest creates a pull request with validation
