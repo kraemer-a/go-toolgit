@@ -74,6 +74,11 @@ type FyneApp struct {
 	prBodyEntry               *widget.Entry
 	branchPrefixEntry         *widget.Entry
 
+	// Repository filtering
+	repoFilterEntry           *widget.Entry
+	filteredRepositories      []Repository
+	repoWidgets              []*fyne.Container
+
 	// Migration widgets
 	sourceURLEntry    *widget.Entry
 	targetOrgEntry    *widget.Entry
@@ -354,6 +359,23 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 	loadReposBtn := widget.NewButtonWithIcon("🔄 Load Repositories", theme.DownloadIcon(), f.handleLoadRepositories)
 	loadReposBtn.Importance = widget.HighImportance
 
+	// Repository filter entry
+	f.repoFilterEntry = widget.NewEntry()
+	f.repoFilterEntry.SetPlaceHolder("🔍 Filter repositories...")
+	f.repoFilterEntry.OnChanged = f.handleRepositoryFilter
+
+	// Clear filter button
+	clearFilterBtn := widget.NewButtonWithIcon("", theme.ContentClearIcon(), func() {
+		f.repoFilterEntry.SetText("")
+	})
+	clearFilterBtn.Importance = widget.MediumImportance
+
+	// Filter container
+	filterContainer := container.New(layout.NewBorderLayout(nil, nil, nil, clearFilterBtn),
+		f.repoFilterEntry,
+		clearFilterBtn,
+	)
+
 	// Select/Deselect all buttons
 	selectAllBtn := widget.NewButton("Select All", f.handleSelectAllRepos)
 	deselectAllBtn := widget.NewButton("Deselect All", f.handleDeselectAllRepos)
@@ -374,6 +396,8 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 	repoButtons := container.New(layout.NewVBoxLayout(),
 		loadSection,
 		selectionButtons,
+		widget.NewSeparator(),
+		filterContainer,
 	)
 
 	// Processing buttons
@@ -882,6 +906,8 @@ func (f *FyneApp) handleLoadRepositories() {
 		fyne.Do(func() {
 			f.repoSelectionContainer.RemoveAll()
 			f.repositories = repos // Store complete repository information
+			f.filteredRepositories = repos // Initially all repositories are visible
+			f.repoWidgets = make([]*fyne.Container, 0, len(repos)) // Clear existing widgets
 
 			for _, repo := range repos {
 				// Create a container with toggle and label
@@ -898,7 +924,11 @@ func (f *FyneApp) handleLoadRepositories() {
 				)
 
 				f.repoSelectionContainer.Add(repoContainer)
+				f.repoWidgets = append(f.repoWidgets, repoContainer) // Store widget reference
 			}
+			
+			// Clear any existing filter
+			f.repoFilterEntry.SetText("")
 		})
 
 		f.hideLoading()
@@ -907,6 +937,73 @@ func (f *FyneApp) handleLoadRepositories() {
 		// Refresh rate limit after GitHub API call
 		f.refreshRateLimit()
 	}()
+}
+
+// handleRepositoryFilter filters repositories based on search text
+func (f *FyneApp) handleRepositoryFilter(filterText string) {
+	if len(f.repositories) == 0 {
+		return // No repositories loaded yet
+	}
+	
+	// Convert filter text to lowercase for case-insensitive search
+	filterLower := strings.ToLower(strings.TrimSpace(filterText))
+	
+	// Filter repositories
+	var filteredRepos []Repository
+	var visibleIndices []int
+	
+	for i, repo := range f.repositories {
+		if filterLower == "" || strings.Contains(strings.ToLower(repo.Name), filterLower) {
+			filteredRepos = append(filteredRepos, repo)
+			visibleIndices = append(visibleIndices, i)
+		}
+	}
+	
+	f.filteredRepositories = filteredRepos
+	
+	// Update UI visibility
+	f.updateRepositoryVisibility(visibleIndices)
+	
+	// Update status with filter results
+	if filterLower == "" {
+		f.setStatus(fmt.Sprintf("Showing all %d repositories", len(f.repositories)))
+	} else {
+		f.setStatus(fmt.Sprintf("Filter: %d of %d repositories match '%s'", len(filteredRepos), len(f.repositories), filterText))
+	}
+}
+
+// updateRepositoryVisibility shows/hides repository widgets based on filter
+func (f *FyneApp) updateRepositoryVisibility(visibleIndices []int) {
+	if len(f.repoWidgets) == 0 {
+		return
+	}
+	
+	// Create a set of visible indices for O(1) lookup
+	visibleSet := make(map[int]bool)
+	for _, idx := range visibleIndices {
+		visibleSet[idx] = true
+	}
+	
+	// Remove all widgets from container
+	f.repoSelectionContainer.RemoveAll()
+	
+	// Add only visible widgets back
+	for i, widget := range f.repoWidgets {
+		if visibleSet[i] {
+			f.repoSelectionContainer.Add(widget)
+		}
+	}
+	
+	// Add "no results" message if no repositories match
+	if len(visibleIndices) == 0 && len(f.repositories) > 0 {
+		noResultsLabel := widget.NewLabel("No repositories match the current filter")
+		noResultsLabel.Alignment = fyne.TextAlignCenter
+		noResultsLabel.TextStyle = fyne.TextStyle{Italic: true}
+		f.repoSelectionContainer.Add(container.NewCenter(noResultsLabel))
+	}
+	
+	// Refresh the container to update the UI
+	f.repoSelectionContainer.Refresh()
 }
 
 func (f *FyneApp) handleValidateReplacement() {
@@ -1174,15 +1271,18 @@ func (f *FyneApp) collectReplacementRules() []ReplacementRule {
 func (f *FyneApp) collectSelectedRepositories() []Repository {
 	var selectedRepos []Repository
 
-	// Get the selected toggles
-	for i, obj := range f.repoSelectionContainer.Objects {
-		if container, ok := obj.(*fyne.Container); ok {
-			if toggle, ok := container.Objects[0].(*ToggleSwitch); ok {
-				if toggle.Checked && i < len(f.repositories) {
-					repo := f.repositories[i]
-					repo.Selected = true
-					selectedRepos = append(selectedRepos, repo)
-				}
+	// Since widgets might be filtered, we need to map visible widgets back to repository indices
+	if len(f.repoWidgets) == 0 {
+		return selectedRepos
+	}
+
+	// Check each repository widget for selection state
+	for i, repoWidget := range f.repoWidgets {
+		if toggle, ok := repoWidget.Objects[0].(*ToggleSwitch); ok {
+			if toggle.Checked && i < len(f.repositories) {
+				repo := f.repositories[i]
+				repo.Selected = true
+				selectedRepos = append(selectedRepos, repo)
 			}
 		}
 	}
@@ -1212,6 +1312,7 @@ func (f *FyneApp) joinPatterns(patterns []string) string {
 }
 
 func (f *FyneApp) handleSelectAllRepos() {
+	// Select all currently visible repositories (filtered)
 	for _, obj := range f.repoSelectionContainer.Objects {
 		if container, ok := obj.(*fyne.Container); ok {
 			if toggle, ok := container.Objects[0].(*ToggleSwitch); ok {
@@ -1219,15 +1320,28 @@ func (f *FyneApp) handleSelectAllRepos() {
 			}
 		}
 	}
+	
+	// Update status to show how many were selected
+	visibleCount := len(f.repoSelectionContainer.Objects)
+	if visibleCount > 0 {
+		f.setStatus(fmt.Sprintf("Selected all %d visible repositories", visibleCount))
+	}
 }
 
 func (f *FyneApp) handleDeselectAllRepos() {
+	// Deselect all currently visible repositories (filtered)  
 	for _, obj := range f.repoSelectionContainer.Objects {
 		if container, ok := obj.(*fyne.Container); ok {
 			if toggle, ok := container.Objects[0].(*ToggleSwitch); ok {
 				toggle.SetChecked(false)
 			}
 		}
+	}
+	
+	// Update status to show how many were deselected
+	visibleCount := len(f.repoSelectionContainer.Objects)
+	if visibleCount > 0 {
+		f.setStatus(fmt.Sprintf("Deselected all %d visible repositories", visibleCount))
 	}
 }
 
