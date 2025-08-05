@@ -59,10 +59,23 @@ type FyneApp struct {
 
 	// Config widgets
 	providerSelect *widget.Select
-	githubURLEntry *widget.Entry
-	tokenEntry     *widget.Entry
-	orgEntry       *widget.Entry
-	teamEntry      *widget.Entry
+	
+	// GitHub-specific widget instances
+	githubURLEntry    *widget.Entry
+	githubTokenEntry  *widget.Entry
+	githubOrgEntry    *widget.Entry
+	githubTeamEntry   *widget.Entry
+	
+	// Bitbucket-specific widget instances  
+	bitbucketURLEntry      *widget.Entry
+	bitbucketUsernameEntry *widget.Entry
+	bitbucketPasswordEntry *widget.Entry
+	bitbucketProjectEntry  *widget.Entry
+	
+	// Dynamic form management
+	configForm        *widget.Form
+	providerContainer *fyne.Container
+	helpText          *widget.RichText
 
 	// String replacement widgets
 	replacementRulesContainer *fyne.Container
@@ -260,24 +273,20 @@ func (f *FyneApp) setupUI() {
 }
 
 func (f *FyneApp) createConfigTab() *fyne.Container {
-	// Provider selection
+	// Provider selection with callback
 	f.providerSelect = widget.NewSelect([]string{"github", "bitbucket"}, func(selected string) {
-		f.logger.Debug("Provider selected", "provider", selected)
+		f.logger.Info("Provider selected", "provider", selected)
+		// Clear values when user manually switches providers to prevent cross-contamination
+		f.updateProviderFieldsWithClear(selected, true)
 	})
 	f.providerSelect.Selected = "github"
 
-	// GitHub config
-	f.githubURLEntry = widget.NewEntry()
-	f.githubURLEntry.SetPlaceHolder("https://api.github.com")
+	// Initialize all field entries
+	f.initializeConfigFields()
 
-	f.tokenEntry = widget.NewPasswordEntry()
-	f.tokenEntry.SetPlaceHolder("ghp_your_github_token")
-
-	f.orgEntry = widget.NewEntry()
-	f.orgEntry.SetPlaceHolder("your-organization")
-
-	f.teamEntry = widget.NewEntry()
-	f.teamEntry.SetPlaceHolder("your-team")
+	// Create dynamic form
+	f.configForm = &widget.Form{}
+	f.providerContainer = container.New(layout.NewVBoxLayout())
 
 	// Buttons
 	validateBtn := widget.NewButtonWithIcon("Validate Configuration", theme.ConfirmIcon(), f.handleValidateConfig)
@@ -286,34 +295,21 @@ func (f *FyneApp) createConfigTab() *fyne.Container {
 	saveBtn := widget.NewButtonWithIcon("Save Configuration", theme.DocumentSaveIcon(), f.handleSaveConfig)
 	saveBtn.Importance = widget.MediumImportance
 
-	form := &widget.Form{
-		Items: []*widget.FormItem{
-			{Text: "Provider", Widget: f.providerSelect, HintText: "Choose your Git provider"},
-			{Text: "GitHub URL", Widget: f.githubURLEntry, HintText: "API endpoint URL"},
-			{Text: "Access Token", Widget: f.tokenEntry, HintText: "Personal access token"},
-			{Text: "Organization", Widget: f.orgEntry, HintText: "Your organization name"},
-			{Text: "Team", Widget: f.teamEntry, HintText: "Your team name"},
-		},
-	}
-
 	buttonsContainer := container.New(
 		layout.NewHBoxLayout(),
 		saveBtn,
 		validateBtn,
 	)
 
-	configCard := widget.NewCard("Configuration", "Setup your GitHub/Bitbucket access", form)
+	// Initialize with GitHub fields (default)
+	f.updateProviderFields("github")
 
-	// Add help text
-	helpText := widget.NewRichTextFromMarkdown(`
-### Quick Setup Guide
-1. Select your Git provider (GitHub or Bitbucket)
-2. Enter your API URL (use default for GitHub.com)
-3. Generate and enter a personal access token
-4. Enter your organization and team names
-5. Click "Validate Configuration" to test
-`)
-	helpCard := widget.NewCard("", "Getting Started", helpText)
+	configCard := widget.NewCard("Configuration", "Setup your Git provider access", f.providerContainer)
+
+	// Create dynamic help text
+	f.helpText = widget.NewRichTextFromMarkdown("")
+	f.updateHelpText("github")
+	helpCard := widget.NewCard("", "Getting Started", f.helpText)
 
 	return container.New(
 		layout.NewVBoxLayout(),
@@ -321,6 +317,210 @@ func (f *FyneApp) createConfigTab() *fyne.Container {
 		helpCard,
 		container.NewPadded(buttonsContainer),
 	)
+}
+
+// Initialize all configuration field entries with separate instances for each provider
+func (f *FyneApp) initializeConfigFields() {
+	// GitHub widget instances - all separate
+	f.githubURLEntry = widget.NewEntry()
+	f.githubURLEntry.SetPlaceHolder("https://api.github.com")
+
+	f.githubTokenEntry = widget.NewPasswordEntry()
+	f.githubTokenEntry.SetPlaceHolder("ghp_your_github_token")
+
+	f.githubOrgEntry = widget.NewEntry()
+	f.githubOrgEntry.SetPlaceHolder("your-organization")
+
+	f.githubTeamEntry = widget.NewEntry()
+	f.githubTeamEntry.SetPlaceHolder("your-team")
+
+	// Bitbucket widget instances - all separate
+	f.bitbucketURLEntry = widget.NewEntry()
+	f.bitbucketURLEntry.SetPlaceHolder("https://api.bitbucket.org")
+
+	// Create username field as regular Entry (plain text)
+	f.bitbucketUsernameEntry = widget.NewEntry()
+	f.bitbucketUsernameEntry.SetPlaceHolder("your-username")
+	// Explicitly ensure this is NOT a password field
+	f.bitbucketUsernameEntry.Password = false
+	f.logger.Info("Created Bitbucket username widget", "type", fmt.Sprintf("%T", f.bitbucketUsernameEntry), "widget_ptr", fmt.Sprintf("%p", f.bitbucketUsernameEntry), "password_property", f.bitbucketUsernameEntry.Password)
+
+	// Create password field as PasswordEntry (obfuscated)
+	f.bitbucketPasswordEntry = widget.NewPasswordEntry()
+	f.bitbucketPasswordEntry.SetPlaceHolder("your-app-password")
+	// Explicitly ensure password property is set
+	f.bitbucketPasswordEntry.Password = true
+	f.logger.Info("Created Bitbucket password widget", "type", fmt.Sprintf("%T", f.bitbucketPasswordEntry), "widget_ptr", fmt.Sprintf("%p", f.bitbucketPasswordEntry), "password_property", f.bitbucketPasswordEntry.Password)
+
+	f.bitbucketProjectEntry = widget.NewEntry()
+	f.bitbucketProjectEntry.SetPlaceHolder("PROJECT_KEY")
+}
+
+// clearAllWidgetValues clears all configuration widget values to prevent cross-contamination
+func (f *FyneApp) clearAllWidgetValues() {
+	// Clear GitHub widget instances
+	if f.githubURLEntry != nil {
+		f.githubURLEntry.SetText("")
+	}
+	if f.githubTokenEntry != nil {
+		f.githubTokenEntry.SetText("")
+	}
+	if f.githubOrgEntry != nil {
+		f.githubOrgEntry.SetText("")
+	}
+	if f.githubTeamEntry != nil {
+		f.githubTeamEntry.SetText("")
+	}
+	
+	// Clear Bitbucket widget instances
+	if f.bitbucketURLEntry != nil {
+		f.bitbucketURLEntry.SetText("")
+	}
+	if f.bitbucketUsernameEntry != nil {
+		f.bitbucketUsernameEntry.SetText("")
+	}
+	if f.bitbucketPasswordEntry != nil {
+		f.bitbucketPasswordEntry.SetText("")
+	}
+	if f.bitbucketProjectEntry != nil {
+		f.bitbucketProjectEntry.SetText("")
+	}
+}
+
+// Update form fields based on selected provider
+func (f *FyneApp) updateProviderFields(provider string) {
+	f.updateProviderFieldsWithClear(provider, false)
+}
+
+// updateProviderFieldsWithClear updates form fields and optionally clears values
+func (f *FyneApp) updateProviderFieldsWithClear(provider string, clearValues bool) {
+	f.logger.Info("Updating provider fields", "provider", provider, "clear_values", clearValues)
+	
+	// Clear existing form items
+	f.configForm.Items = []*widget.FormItem{}
+
+	// Clear widget values if requested (to prevent cross-contamination)
+	if clearValues {
+		f.clearAllWidgetValues()
+	}
+
+	// Always add provider selection first
+	f.configForm.Items = append(f.configForm.Items, &widget.FormItem{
+		Text:     "Provider",
+		Widget:   f.providerSelect,
+		HintText: "Choose your Git provider",
+	})
+
+	if provider == "github" {
+		f.addGitHubFields()
+	} else if provider == "bitbucket" {
+		f.addBitbucketFields()
+	}
+
+	// Update the provider container
+	f.providerContainer.Objects = []fyne.CanvasObject{f.configForm}
+	f.providerContainer.Refresh()
+	f.logger.Info("Provider container refreshed", "provider", provider)
+
+	// Update help text
+	f.updateHelpText(provider)
+}
+
+// Add GitHub-specific form fields using dedicated GitHub widget instances
+func (f *FyneApp) addGitHubFields() {
+	f.configForm.Items = append(f.configForm.Items, []*widget.FormItem{
+		{
+			Text:     "GitHub URL",
+			Widget:   f.githubURLEntry,
+			HintText: "API endpoint (e.g., https://api.github.com or https://github.company.com/api/v3)",
+		},
+		{
+			Text:     "Personal Access Token",
+			Widget:   f.githubTokenEntry,
+			HintText: "GitHub PAT with repo and org:read permissions",
+		},
+		{
+			Text:     "Organization",
+			Widget:   f.githubOrgEntry,
+			HintText: "Your GitHub organization name",
+		},
+		{
+			Text:     "Team",
+			Widget:   f.githubTeamEntry,
+			HintText: "Your team slug within the organization",
+		},
+	}...)
+}
+
+// Add Bitbucket-specific form fields using dedicated Bitbucket widget instances
+func (f *FyneApp) addBitbucketFields() {
+	f.logger.Info("Adding Bitbucket form fields", 
+		"username_widget_type", fmt.Sprintf("%T", f.bitbucketUsernameEntry),
+		"username_widget_ptr", fmt.Sprintf("%p", f.bitbucketUsernameEntry),
+		"username_password_prop", f.bitbucketUsernameEntry.Password,
+		"password_widget_type", fmt.Sprintf("%T", f.bitbucketPasswordEntry),
+		"password_widget_ptr", fmt.Sprintf("%p", f.bitbucketPasswordEntry),
+		"password_password_prop", f.bitbucketPasswordEntry.Password)
+	
+	f.configForm.Items = append(f.configForm.Items, []*widget.FormItem{
+		{
+			Text:     "Bitbucket URL",
+			Widget:   f.bitbucketURLEntry,
+			HintText: "API endpoint (e.g., https://api.bitbucket.org or https://bitbucket.company.com)",
+		},
+		{
+			Text:     "Username",
+			Widget:   f.bitbucketUsernameEntry,
+			HintText: "Your Bitbucket username",
+		},
+		{
+			Text:     "App Password",
+			Widget:   f.bitbucketPasswordEntry,
+			HintText: "Bitbucket app password with repository permissions",
+		},
+		{
+			Text:     "Project Key",
+			Widget:   f.bitbucketProjectEntry,
+			HintText: "Your Bitbucket project key (e.g., MYPROJ)",
+		},
+	}...)
+}
+
+// Update help text based on provider
+func (f *FyneApp) updateHelpText(provider string) {
+	if f.helpText == nil {
+		return
+	}
+
+	var helpContent string
+	if provider == "github" {
+		helpContent = `
+### GitHub Setup Guide
+1. **Generate Personal Access Token**:
+   - Go to GitHub Settings → Developer settings → Personal access tokens
+   - Create token with 'repo' and 'read:org' scopes
+2. **Find Organization & Team**:
+   - Use your GitHub organization name
+   - Use team slug (lowercase, hyphenated)
+3. **Enterprise GitHub**: Use your company's API URL
+4. Click "Validate Configuration" to test connection
+`
+	} else {
+		helpContent = `
+### Bitbucket Setup Guide
+1. **Create App Password**:
+   - Go to Bitbucket Settings → App passwords
+   - Create password with 'Repositories: Read/Write' permissions
+2. **Find Project Key**:
+   - Visit your project page
+   - Project key is shown in uppercase (e.g., MYPROJ)
+3. **Bitbucket Server**: Use your company's Bitbucket URL
+4. Click "Validate Configuration" to test connection
+`
+	}
+
+	f.helpText.ParseMarkdown(helpContent)
+	f.helpText.Refresh()
 }
 
 func (f *FyneApp) createReplacementTab() *fyne.Container {
@@ -560,9 +760,9 @@ func (f *FyneApp) handleValidateConfig() {
 	configData := ConfigData{
 		Provider:        f.providerSelect.Selected,
 		GitHubURL:       f.githubURLEntry.Text,
-		Token:           f.tokenEntry.Text,
-		Organization:    f.orgEntry.Text,
-		Team:            f.teamEntry.Text,
+		Token:           f.githubTokenEntry.Text,
+		Organization:    f.githubOrgEntry.Text,
+		Team:            f.githubTeamEntry.Text,
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
 		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
 		PRTitleTemplate: f.prTitleEntry.Text,
@@ -602,15 +802,50 @@ func (f *FyneApp) handleSaveConfig() {
 
 	configData := ConfigData{
 		Provider:        f.providerSelect.Selected,
-		GitHubURL:       f.githubURLEntry.Text,
-		Token:           f.tokenEntry.Text,
-		Organization:    f.orgEntry.Text,
-		Team:            f.teamEntry.Text,
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
 		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
 		PRTitleTemplate: f.prTitleEntry.Text,
 		PRBodyTemplate:  f.prBodyEntry.Text,
 		BranchPrefix:    f.branchPrefixEntry.Text,
+	}
+
+	f.logger.Info("GUI collecting config data", "provider", f.providerSelect.Selected)
+
+	// Collect provider-specific fields from dedicated widget instances
+	if f.providerSelect.Selected == "github" {
+		configData.GitHubURL = f.githubURLEntry.Text
+		configData.Token = f.githubTokenEntry.Text
+		configData.Organization = f.githubOrgEntry.Text
+		configData.Team = f.githubTeamEntry.Text
+		
+		f.logger.Debug("Collected GitHub fields from dedicated widgets", 
+			"base_url", configData.GitHubURL,
+			"org", configData.Organization,
+			"team", configData.Team,
+			"token_length", len(configData.Token))
+		
+		// Clear Bitbucket fields
+		configData.BitbucketURL = ""
+		configData.Username = ""
+		configData.Password = ""
+		configData.Project = ""
+	} else if f.providerSelect.Selected == "bitbucket" {
+		configData.BitbucketURL = f.bitbucketURLEntry.Text
+		configData.Username = f.bitbucketUsernameEntry.Text
+		configData.Password = f.bitbucketPasswordEntry.Text
+		configData.Project = f.bitbucketProjectEntry.Text
+		
+		f.logger.Info("Collected Bitbucket fields from dedicated widgets", 
+			"base_url", configData.BitbucketURL,
+			"username", configData.Username,
+			"project", configData.Project,
+			"password_length", len(configData.Password))
+		
+		// Clear GitHub fields
+		configData.GitHubURL = ""
+		configData.Token = ""
+		configData.Organization = ""
+		configData.Team = ""
 	}
 
 	go func() {
@@ -630,13 +865,13 @@ func (f *FyneApp) handleSaveMigrationConfig() {
 	f.setStatus("Saving migration configuration...")
 	f.showLoading("Saving migration configuration...")
 	
-	// Collect current base configuration data
+	// Collect current base configuration data from dedicated widget instances
 	configData := ConfigData{
 		Provider:        f.providerSelect.Selected,
 		GitHubURL:       f.githubURLEntry.Text,
-		Token:           f.tokenEntry.Text,
-		Organization:    f.orgEntry.Text,
-		Team:            f.teamEntry.Text,
+		Token:           f.githubTokenEntry.Text,
+		Organization:    f.githubOrgEntry.Text,
+		Team:            f.githubTeamEntry.Text,
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
 		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
 		PRTitleTemplate: f.prTitleEntry.Text,
@@ -2052,21 +2287,44 @@ func (f *FyneApp) loadConfigurationFromFile() {
 		return
 	}
 
-	// Prefill configuration fields
+	// Set provider and update fields (this will trigger the provider change callback)
 	if configData.Provider != "" {
 		f.providerSelect.SetSelected(configData.Provider)
+		// Manually trigger the update since SetSelected doesn't always trigger callback
+		f.updateProviderFields(configData.Provider)
+	} else {
+		// Default to GitHub if no provider is set
+		f.providerSelect.SetSelected("github")
+		f.updateProviderFields("github")
 	}
-	if configData.GitHubURL != "" {
-		f.githubURLEntry.SetText(configData.GitHubURL)
-	}
-	if configData.Token != "" {
-		f.tokenEntry.SetText(configData.Token)
-	}
-	if configData.Organization != "" {
-		f.orgEntry.SetText(configData.Organization)
-	}
-	if configData.Team != "" {
-		f.teamEntry.SetText(configData.Team)
+
+	// Prefill provider-specific fields using dedicated widget instances
+	if configData.Provider == "github" {
+		if configData.GitHubURL != "" {
+			f.githubURLEntry.SetText(configData.GitHubURL)
+		}
+		if configData.Token != "" {
+			f.githubTokenEntry.SetText(configData.Token)
+		}
+		if configData.Organization != "" {
+			f.githubOrgEntry.SetText(configData.Organization)
+		}
+		if configData.Team != "" {
+			f.githubTeamEntry.SetText(configData.Team)
+		}
+	} else if configData.Provider == "bitbucket" {
+		if configData.BitbucketURL != "" {
+			f.bitbucketURLEntry.SetText(configData.BitbucketURL)
+		}
+		if configData.Username != "" {
+			f.bitbucketUsernameEntry.SetText(configData.Username)
+		}
+		if configData.Password != "" {
+			f.bitbucketPasswordEntry.SetText(configData.Password)
+		}
+		if configData.Project != "" {
+			f.bitbucketProjectEntry.SetText(configData.Project)
+		}
 	}
 
 	// Prefill pattern fields
@@ -2103,8 +2361,8 @@ func (f *FyneApp) loadConfigurationFromFile() {
 		}
 	}
 
-	// Update the service configuration to initialize GitHub client
-	err = f.service.UpdateConfig(*configData)
+	// Initialize the service configuration without saving to disk
+	err = f.service.InitializeServiceConfig(*configData)
 	if err != nil {
 		f.setStatusError(fmt.Sprintf("Failed to initialize GitHub client: %v", err))
 		return

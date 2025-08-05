@@ -67,10 +67,20 @@ type RepositoryResult struct {
 // ConfigData holds configuration data for the GUI
 type ConfigData struct {
 	Provider        string   `json:"provider"`
+	
+	// GitHub-specific fields
 	GitHubURL       string   `json:"github_url"`
 	Token           string   `json:"token"`
 	Organization    string   `json:"organization"`
 	Team            string   `json:"team"`
+	
+	// Bitbucket-specific fields
+	BitbucketURL    string   `json:"bitbucket_url"`
+	Username        string   `json:"username"`
+	Password        string   `json:"password"`
+	Project         string   `json:"project"`
+	
+	// Common fields
 	IncludePatterns []string `json:"include_patterns"`
 	ExcludePatterns []string `json:"exclude_patterns"`
 	PRTitleTemplate string   `json:"pr_title_template"`
@@ -133,32 +143,17 @@ func NewService(cfg *config.Config, logger *utils.Logger) *Service {
 
 // SaveConfig saves the current configuration to disk with automatic encryption
 func (s *Service) SaveConfig(configData ConfigData) error {
+	s.logger.Debug("SaveConfig called", "provider", configData.Provider)
+	
 	// Create secure config manager
 	scm, err := config.NewSecureConfigManager()
 	if err != nil {
 		return fmt.Errorf("failed to create secure config manager: %w", err)
 	}
 
-	// Convert ConfigData to Config struct
+	// Convert ConfigData to Config struct with provider-specific field mapping
 	cfg := &config.Config{
 		Provider: configData.Provider,
-		GitHub: config.GitHubConfig{
-			BaseURL:          configData.GitHubURL,
-			Token:            configData.Token,
-			Org:              configData.Organization,
-			Team:             configData.Team,
-			Timeout:          s.config.GitHub.Timeout,
-			MaxRetries:       s.config.GitHub.MaxRetries,
-			WaitForRateLimit: s.config.GitHub.WaitForRateLimit,
-		},
-		Bitbucket: config.BitbucketConfig{
-			BaseURL:    s.config.Bitbucket.BaseURL,
-			Username:   s.config.Bitbucket.Username,
-			Password:   s.config.Bitbucket.Password,
-			Project:    s.config.Bitbucket.Project,
-			Timeout:    s.config.Bitbucket.Timeout,
-			MaxRetries: s.config.Bitbucket.MaxRetries,
-		},
 		Processing: config.ProcessingConfig{
 			IncludePatterns: configData.IncludePatterns,
 			ExcludePatterns: configData.ExcludePatterns,
@@ -174,6 +169,51 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 		Logging: s.config.Logging,
 	}
 
+	// Set provider-specific fields based on selected provider
+	if configData.Provider == "github" {
+		s.logger.Debug("Saving GitHub configuration", 
+			"base_url", configData.GitHubURL,
+			"org", configData.Organization,
+			"team", configData.Team,
+			"token_length", len(configData.Token))
+		
+		cfg.GitHub = config.GitHubConfig{
+			BaseURL:          configData.GitHubURL,
+			Token:            configData.Token,
+			Org:              configData.Organization,
+			Team:             configData.Team,
+			Timeout:          s.config.GitHub.Timeout,
+			MaxRetries:       s.config.GitHub.MaxRetries,
+			WaitForRateLimit: s.config.GitHub.WaitForRateLimit,
+		}
+		// Clear Bitbucket config when using GitHub
+		cfg.Bitbucket = config.BitbucketConfig{
+			Timeout:    s.config.Bitbucket.Timeout,
+			MaxRetries: s.config.Bitbucket.MaxRetries,
+		}
+	} else if configData.Provider == "bitbucket" {
+		s.logger.Debug("Saving Bitbucket configuration", 
+			"base_url", configData.BitbucketURL,
+			"username", configData.Username,
+			"project", configData.Project,
+			"password_length", len(configData.Password))
+		
+		cfg.Bitbucket = config.BitbucketConfig{
+			BaseURL:    configData.BitbucketURL,
+			Username:   configData.Username,
+			Password:   configData.Password,
+			Project:    configData.Project,
+			Timeout:    s.config.Bitbucket.Timeout,
+			MaxRetries: s.config.Bitbucket.MaxRetries,
+		}
+		// Clear GitHub config when using Bitbucket
+		cfg.GitHub = config.GitHubConfig{
+			Timeout:          s.config.GitHub.Timeout,
+			MaxRetries:       s.config.GitHub.MaxRetries,
+			WaitForRateLimit: s.config.GitHub.WaitForRateLimit,
+		}
+	}
+
 	// Save migration settings to viper (these are not encrypted)
 	viper.Set("migration.source_url", configData.MigrationSourceURL)
 	viper.Set("migration.target_org", configData.MigrationTargetOrg)
@@ -183,9 +223,12 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 	
 	// Always try current directory first
 	currentDirConfig := "./config.yaml"
+	s.logger.Debug("Attempting to save config to current directory", "path", currentDirConfig)
 	if err := scm.SaveSecureConfigToFile(cfg, currentDirConfig); err == nil {
 		s.logger.Info("Saved encrypted config to current directory", "path", currentDirConfig)
 		return nil
+	} else {
+		s.logger.Debug("Failed to save to current directory", "error", err.Error())
 	}
 	
 	// Current directory failed, try home directory
@@ -208,48 +251,42 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 	return nil
 }
 
-// UpdateConfig updates the service configuration and initializes clients
-func (s *Service) UpdateConfig(configData ConfigData) error {
-	// Save configuration to disk first
-	if err := s.SaveConfig(configData); err != nil {
-		return fmt.Errorf("failed to save configuration: %w", err)
-	}
-	
-	// Update config with new data
-	if configData.GitHubURL != "" {
-		s.config.GitHub.BaseURL = configData.GitHubURL
-	}
-	if configData.Token != "" {
-		s.config.GitHub.Token = configData.Token
-	}
-	if configData.Organization != "" {
-		s.config.GitHub.Org = configData.Organization
-	}
-	if configData.Team != "" {
-		s.config.GitHub.Team = configData.Team
-	}
-	
-	// Update processing patterns in config
-	if len(configData.IncludePatterns) > 0 {
-		s.config.Processing.IncludePatterns = configData.IncludePatterns
-	}
-	if len(configData.ExcludePatterns) > 0 {
-		s.config.Processing.ExcludePatterns = configData.ExcludePatterns
-	}
-	
-	// Update pull request config
-	if configData.PRTitleTemplate != "" {
-		s.config.PullRequest.TitleTemplate = configData.PRTitleTemplate
-	}
-	if configData.PRBodyTemplate != "" {
-		s.config.PullRequest.BodyTemplate = configData.PRBodyTemplate
-	}
-	if configData.BranchPrefix != "" {
-		s.config.PullRequest.BranchPrefix = configData.BranchPrefix
-	}
-	
-	// Update provider
+// InitializeServiceConfig updates the service's internal configuration and clients without saving to disk
+func (s *Service) InitializeServiceConfig(configData ConfigData) error {
+	// Update provider first
 	s.config.Provider = configData.Provider
+	
+	// Update provider-specific fields (allow empty values to enable clearing)
+	if configData.Provider == "github" {
+		s.config.GitHub.BaseURL = configData.GitHubURL
+		s.config.GitHub.Token = configData.Token
+		s.config.GitHub.Org = configData.Organization
+		s.config.GitHub.Team = configData.Team
+		// Clear Bitbucket fields when using GitHub
+		s.config.Bitbucket.BaseURL = ""
+		s.config.Bitbucket.Username = ""
+		s.config.Bitbucket.Password = ""
+		s.config.Bitbucket.Project = ""
+	} else if configData.Provider == "bitbucket" {
+		s.config.Bitbucket.BaseURL = configData.BitbucketURL
+		s.config.Bitbucket.Username = configData.Username
+		s.config.Bitbucket.Password = configData.Password
+		s.config.Bitbucket.Project = configData.Project
+		// Clear GitHub fields when using Bitbucket
+		s.config.GitHub.BaseURL = ""
+		s.config.GitHub.Token = ""
+		s.config.GitHub.Org = ""
+		s.config.GitHub.Team = ""
+	}
+	
+	// Update processing patterns (allow empty to enable clearing)
+	s.config.Processing.IncludePatterns = configData.IncludePatterns
+	s.config.Processing.ExcludePatterns = configData.ExcludePatterns
+	
+	// Update pull request config (allow empty to enable clearing)
+	s.config.PullRequest.TitleTemplate = configData.PRTitleTemplate
+	s.config.PullRequest.BodyTemplate = configData.PRBodyTemplate
+	s.config.PullRequest.BranchPrefix = configData.BranchPrefix
 
 	// Create GitHub client config
 	githubConfig := &github.Config{
@@ -278,6 +315,17 @@ func (s *Service) UpdateConfig(configData ConfigData) error {
 	}
 
 	return nil
+}
+
+// UpdateConfig updates the service configuration and initializes clients (saves to disk)
+func (s *Service) UpdateConfig(configData ConfigData) error {
+	// Save configuration to disk first
+	if err := s.SaveConfig(configData); err != nil {
+		return fmt.Errorf("failed to save configuration: %w", err)
+	}
+	
+	// Initialize service configuration
+	return s.InitializeServiceConfig(configData)
 }
 
 // ValidateAccess validates the GitHub access configuration
@@ -605,12 +653,8 @@ func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 		provider = "github"
 	}
 	
-	return &ConfigData{
+	configData := &ConfigData{
 		Provider:        provider,
-		GitHubURL:       cfg.GitHub.BaseURL,
-		Token:           cfg.GitHub.Token, // This is now automatically decrypted
-		Organization:    cfg.GitHub.Org,
-		Team:            cfg.GitHub.Team,
 		IncludePatterns: cfg.Processing.IncludePatterns,
 		ExcludePatterns: cfg.Processing.ExcludePatterns,
 		PRTitleTemplate: cfg.PullRequest.TitleTemplate,
@@ -623,7 +667,32 @@ func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 		MigrationTargetRepo:  viper.GetString("migration.target_repo"),
 		MigrationWebhookURL:  viper.GetString("migration.webhook_url"),
 		MigrationTeams:       viper.GetStringMapString("migration.teams"),
-	}, nil
+	}
+
+	// Load provider-specific fields based on the current provider
+	if provider == "github" {
+		configData.GitHubURL = cfg.GitHub.BaseURL
+		configData.Token = cfg.GitHub.Token // This is now automatically decrypted
+		configData.Organization = cfg.GitHub.Org
+		configData.Team = cfg.GitHub.Team
+		// Set default values for unused Bitbucket fields
+		configData.BitbucketURL = ""
+		configData.Username = ""
+		configData.Password = ""
+		configData.Project = ""
+	} else if provider == "bitbucket" {
+		configData.BitbucketURL = cfg.Bitbucket.BaseURL
+		configData.Username = cfg.Bitbucket.Username
+		configData.Password = cfg.Bitbucket.Password // This is now automatically decrypted
+		configData.Project = cfg.Bitbucket.Project
+		// Set default values for unused GitHub fields
+		configData.GitHubURL = ""
+		configData.Token = ""
+		configData.Organization = ""
+		configData.Team = ""
+	}
+
+	return configData, nil
 }
 
 // GetRateLimitInfo retrieves GitHub API rate limit information  
@@ -651,12 +720,12 @@ func initializeViper() {
 	// Set defaults
 	setDefaults()
 	
-	// Configure search paths
+	// Configure search paths (current directory first to match save priority)
+	viper.AddConfigPath(".")
 	home, err := os.UserHomeDir()
 	if err == nil {
 		viper.AddConfigPath(home + "/.go-toolgit")
 	}
-	viper.AddConfigPath(".")
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	
