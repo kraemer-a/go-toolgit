@@ -225,29 +225,29 @@ func ShowToast(window fyne.Window, message string, toastType string) {
 		dismissButton, // Invisible button overlay for clicking
 	)
 
-	// Calculate positioning - move to bottom-right to avoid blocking main UI
+	// Calculate positioning - move to top-center for better visibility
 	windowSize := window.Canvas().Size()
 	toastSize := fyne.NewSize(300, 60) // Fixed size for consistency
 	toastContainer.Resize(toastSize)
 	
-	// Position in bottom-right corner with margin
+	// Position in top-center with margin
 	margin := float32(20)
-	finalX := windowSize.Width - toastSize.Width - margin
-	finalY := windowSize.Height - toastSize.Height - margin
-	startY := windowSize.Height + toastSize.Height // Start below window
+	finalX := (windowSize.Width - toastSize.Width) / 2 // Center horizontally
+	finalY := margin                                    // Top with margin
+	startY := -toastSize.Height                        // Start above window
 
 	// Add toast to overlay
 	overlay.Add(toastContainer)
 	
-	// Position the toast initially off-screen (bottom)
+	// Position the toast initially off-screen (above)
 	toastContainer.Move(fyne.NewPos(finalX, startY))
 
 	// Add to window overlays
 	window.Canvas().Overlays().Add(overlay)
 
-	// Animate in from bottom
+	// Animate in from top (slide down)
 	animation := fyne.NewAnimation(250*time.Millisecond, func(progress float32) {
-		y := startY - (startY-finalY)*progress
+		y := startY + (finalY-startY)*progress
 		toastContainer.Move(fyne.NewPos(finalX, y))
 	})
 	animation.Curve = fyne.AnimationEaseOut
@@ -257,9 +257,9 @@ func ShowToast(window fyne.Window, message string, toastType string) {
 	go func() {
 		time.Sleep(2500 * time.Millisecond)
 
-		// Animate out to bottom
+		// Animate out to top (slide up)
 		outAnimation := fyne.NewAnimation(250*time.Millisecond, func(progress float32) {
-			y := finalY + (startY-finalY)*progress
+			y := finalY - (finalY-startY)*progress
 			toastContainer.Move(fyne.NewPos(finalX, y))
 			if progress >= 1.0 {
 				window.Canvas().Overlays().Remove(overlay)
