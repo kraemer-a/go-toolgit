@@ -17,7 +17,6 @@ import (
 
 	"go-toolgit/internal/core/config"
 	"go-toolgit/internal/core/utils"
-	"go-toolgit/internal/gui"
 )
 
 // AdwaitaVariantTheme wraps the Adwaita theme to force a specific variant (light/dark)
@@ -49,7 +48,7 @@ func (a *AdwaitaVariantTheme) Size(name fyne.ThemeSizeName) float32 {
 type FyneApp struct {
 	app         fyne.App
 	window      fyne.Window
-	service     *gui.Service
+	service     *Service
 	logger      *utils.Logger
 	modernTheme *ModernTheme
 	currentThemeType string // "Modern" or "Adwaita"
@@ -90,7 +89,7 @@ type FyneApp struct {
 	operationStatus *OperationStatus
 
 	// Repository data storage
-	repositories []gui.Repository
+	repositories []Repository
 
 	// Loading indicators
 	loadingOverlay *LoadingContainer
@@ -99,7 +98,16 @@ type FyneApp struct {
 
 func NewFyneApp() *FyneApp {
 	cfg, _ := config.Load()
-	logger := utils.NewLogger("info", "text")
+	
+	// Use configured log level, default to info if config loading failed
+	logLevel := "info"
+	logFormat := "text"
+	if cfg != nil {
+		logLevel = cfg.Logging.Level
+		logFormat = cfg.Logging.Format
+	}
+	
+	logger := utils.NewLogger(logLevel, logFormat)
 
 	fyneApp := app.NewWithID("com.github.go-toolgit")
 
@@ -115,7 +123,7 @@ func NewFyneApp() *FyneApp {
 	window.Resize(fyne.NewSize(1200, 1000))
 	window.CenterOnScreen()
 
-	service := gui.NewService(cfg, logger)
+	service := NewService(cfg, logger)
 
 	return &FyneApp{
 		app:              fyneApp,
@@ -521,7 +529,7 @@ func (f *FyneApp) handleValidateConfig() {
 	f.operationStatus.SetOperation(OperationAPIValidation, "Testing GitHub API connection")
 	f.showLoading("Validating configuration...")
 
-	configData := gui.ConfigData{
+	configData := ConfigData{
 		Provider:        f.providerSelect.Selected,
 		GitHubURL:       f.githubURLEntry.Text,
 		Token:           f.tokenEntry.Text,
@@ -564,7 +572,7 @@ func (f *FyneApp) handleSaveConfig() {
 	f.setStatus("Saving configuration...")
 	f.showLoading("Saving configuration...")
 
-	configData := gui.ConfigData{
+	configData := ConfigData{
 		Provider:        f.providerSelect.Selected,
 		GitHubURL:       f.githubURLEntry.Text,
 		Token:           f.tokenEntry.Text,
@@ -683,7 +691,7 @@ func (f *FyneApp) handleStartMigration() {
 	}()
 }
 
-func (f *FyneApp) collectMigrationConfig() gui.MigrationConfig {
+func (f *FyneApp) collectMigrationConfig() MigrationConfig {
 	teams := make(map[string]string)
 
 	// Collect teams from UI
@@ -699,7 +707,7 @@ func (f *FyneApp) collectMigrationConfig() gui.MigrationConfig {
 		}
 	}
 
-	return gui.MigrationConfig{
+	return MigrationConfig{
 		SourceBitbucketURL:   f.sourceURLEntry.Text,
 		TargetGitHubOrg:      f.targetOrgEntry.Text,
 		TargetRepositoryName: f.targetRepoEntry.Text,
@@ -708,7 +716,7 @@ func (f *FyneApp) collectMigrationConfig() gui.MigrationConfig {
 	}
 }
 
-func (f *FyneApp) displayMigrationSteps(steps []gui.MigrationStep) {
+func (f *FyneApp) displayMigrationSteps(steps []MigrationStep) {
 	f.progressContainer.RemoveAll()
 
 	for _, step := range steps {
@@ -937,7 +945,7 @@ func (f *FyneApp) handleReplacementDryRun() {
 
 	f.showLoading("Analyzing repositories using Git cloning (no API limits consumed)...")
 
-	options := gui.ProcessingOptions{
+	options := ProcessingOptions{
 		DryRun:          true,
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
 		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
@@ -1017,7 +1025,7 @@ func (f *FyneApp) handleProcessReplacements() {
 
 	f.showLoading("Processing replacements and creating pull requests...")
 
-	options := gui.ProcessingOptions{
+	options := ProcessingOptions{
 		DryRun:          false,
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
 		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
@@ -1042,8 +1050,8 @@ func (f *FyneApp) handleProcessReplacements() {
 		}
 
 		// Filter repositories to only include those with actual changes
-		var reposWithChanges []gui.Repository
-		repoMap := make(map[string]gui.Repository)
+		var reposWithChanges []Repository
+		repoMap := make(map[string]Repository)
 
 		// Create a map for quick repository lookup
 		for _, repo := range repos {
@@ -1106,8 +1114,8 @@ func (f *FyneApp) handleProcessReplacements() {
 	}()
 }
 
-func (f *FyneApp) collectReplacementRules() []gui.ReplacementRule {
-	var rules []gui.ReplacementRule
+func (f *FyneApp) collectReplacementRules() []ReplacementRule {
+	var rules []ReplacementRule
 
 	for _, obj := range f.replacementRulesContainer.Objects {
 		if card, ok := obj.(*widget.Card); ok {
@@ -1143,7 +1151,7 @@ func (f *FyneApp) collectReplacementRules() []gui.ReplacementRule {
 											f.setStatus(fmt.Sprintf("Rule collected with WHOLE WORD enabled: %s → %s", originalEntry.Text, replacementEntry.Text))
 										}
 
-										rules = append(rules, gui.ReplacementRule{
+										rules = append(rules, ReplacementRule{
 											Original:      originalEntry.Text,
 											Replacement:   replacementEntry.Text,
 											Regex:         regex,
@@ -1163,8 +1171,8 @@ func (f *FyneApp) collectReplacementRules() []gui.ReplacementRule {
 	return rules
 }
 
-func (f *FyneApp) collectSelectedRepositories() []gui.Repository {
-	var selectedRepos []gui.Repository
+func (f *FyneApp) collectSelectedRepositories() []Repository {
+	var selectedRepos []Repository
 
 	// Get the selected toggles
 	for i, obj := range f.repoSelectionContainer.Objects {
@@ -1223,7 +1231,7 @@ func (f *FyneApp) handleDeselectAllRepos() {
 	}
 }
 
-func (f *FyneApp) showDiffPreview(diffs map[string]map[string]string, rules []gui.ReplacementRule, repos []gui.Repository, options gui.ProcessingOptions) {
+func (f *FyneApp) showDiffPreview(diffs map[string]map[string]string, rules []ReplacementRule, repos []Repository, options ProcessingOptions) {
 	// Create new window for diff preview
 	diffWindow := f.app.NewWindow("Diff Preview - Dry Run Results")
 	diffWindow.Resize(fyne.NewSize(1000, 700))
@@ -1695,7 +1703,7 @@ func (f *FyneApp) createColoredDiffText(diffContent string) *widget.RichText {
 	return richText
 }
 
-func (f *FyneApp) applyChanges(rules []gui.ReplacementRule, repos []gui.Repository, options gui.ProcessingOptions) {
+func (f *FyneApp) applyChanges(rules []ReplacementRule, repos []Repository, options ProcessingOptions) {
 	f.setStatus("Applying changes and creating pull requests...")
 	f.showLoading("Applying changes and creating pull requests...")
 
@@ -1717,8 +1725,8 @@ func (f *FyneApp) applyChanges(rules []gui.ReplacementRule, repos []gui.Reposito
 		}
 
 		// Filter repositories to only include those with actual changes
-		var reposWithChanges []gui.Repository
-		repoMap := make(map[string]gui.Repository)
+		var reposWithChanges []Repository
+		repoMap := make(map[string]Repository)
 
 		// Create a map for quick repository lookup
 		for _, repo := range repos {
@@ -1781,7 +1789,7 @@ func (f *FyneApp) applyChanges(rules []gui.ReplacementRule, repos []gui.Reposito
 	}()
 }
 
-func (f *FyneApp) showResultsDialog(result *gui.ProcessingResult) {
+func (f *FyneApp) showResultsDialog(result *ProcessingResult) {
 	// Create results window
 	resultsWindow := f.app.NewWindow("Processing Results")
 	resultsWindow.Resize(fyne.NewSize(800, 600))

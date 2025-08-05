@@ -24,12 +24,11 @@ migrations across multiple repositories on GitHub and Bitbucket Server.
 Features:
 • String replacement across multiple repositories
 • Repository migration from Bitbucket Server to GitHub
-• Dual GUI support: Wails web interface and Fyne native interface
+• Fyne native GUI interface
 • Team management and webhook configuration
 
-GUI Options:
-  --gui       Launch Wails web-based GUI (requires: wails build)
-  --fyne-gui  Launch Fyne native GUI (works with standard build)
+GUI Option:
+  --gui       Launch Fyne native GUI interface
 
 The tool can connect to on-premise GitHub instances and create pull requests
 with the changes automatically.`,

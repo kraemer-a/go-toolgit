@@ -1,6 +1,6 @@
 # GitHub & Bitbucket Replace Tool
 
-A comprehensive CLI and GUI tool for **automated string replacements** and **repository migrations** across multiple repositories on **GitHub** and **Bitbucket Server**. Built with Go, featuring command-line interface (Cobra), modern web-based GUI (Wails), and native desktop GUI (Fyne).
+A comprehensive CLI and GUI tool for **automated string replacements** and **repository migrations** across multiple repositories on **GitHub** and **Bitbucket Server**. Built with Go, featuring command-line interface (Cobra) and native desktop GUI (Fyne).
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -25,7 +25,7 @@ A comprehensive CLI and GUI tool for **automated string replacements** and **rep
 
 ### 🎯 **Platform & Interface**
 - **Multi-Platform Support**: Works with GitHub.com, GitHub Enterprise, and Bitbucket Server
-- **Triple Interface**: Professional CLI with interactive spinners + modern web-based GUI (Wails) + native desktop GUI (Fyne)
+- **Dual Interface**: Professional CLI with interactive spinners + native desktop GUI (Fyne)
 - **Real-Time Progress**: Interactive spinners (CLI) and progress bars (GUI)
 - **Error Handling**: Comprehensive validation and recovery mechanisms
 
@@ -35,7 +35,6 @@ A comprehensive CLI and GUI tool for **automated string replacements** and **rep
 
 - Go 1.24+
 - Git
-- Node.js 16+ (only for Wails web GUI)
 - Fyne dependencies (for native GUI - auto-installed with Go modules)
 
 ### Option 1: CLI + Fyne Native GUI (Recommended)
@@ -46,29 +45,10 @@ go build -o go-toolgit
 
 # Now you have both:
 # CLI: ./go-toolgit --help
-# Native GUI: ./go-toolgit --fyne-gui
+# Native GUI: ./go-toolgit --gui
 ```
 
-### Option 2: CLI + Wails Web GUI (Advanced)
-```bash
-git clone https://github.com/your-org/go-toolgit.git
-cd go-toolgit
-
-# Install Wails CLI
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-
-# Build CLI binary
-go build -o go-toolgit
-
-# Build Wails GUI application
-wails build
-
-# Now you have both:
-# CLI: ./go-toolgit
-# Web GUI: ./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui
-```
-
-### Option 3: CLI Only
+### Option 2: CLI Only
 ```bash
 git clone https://github.com/your-org/go-toolgit.git
 cd go-toolgit
@@ -174,17 +154,10 @@ pull_request:
 
 Choose between two GUI options:
 
-#### Option A: Fyne Native GUI (Recommended for simplicity)
+#### Fyne Native GUI
 ```bash
 # Works with standard Go build - no additional setup needed
-./go-toolgit --fyne-gui
-```
-
-#### Option B: Wails Web GUI (Advanced web interface)
-```bash
-# Requires Wails build first
-wails build
-./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui
+./go-toolgit --gui
 ```
 
 #### CLI Interface
@@ -284,18 +257,13 @@ Combines all search options above with replacement options:
 
 ## GUI Interface
 
-Choose between two modern GUI interfaces for both string replacement and repository migration:
+Modern native GUI interface for both string replacement and repository migration:
 
-### Fyne Native GUI ⭐ **NEW** (Recommended)
+### Fyne Native GUI
 - **Native Performance**: True native desktop application
 - **Easy Deployment**: Works with standard Go build, no additional setup
 - **Cross-Platform**: Runs on Windows, macOS, and Linux
 - **All Features**: Complete migration and replacement functionality
-
-### Wails Web GUI
-- **Modern Web Interface**: HTML/CSS/JavaScript based UI
-- **Advanced Styling**: Rich web-based experience
-- **Requires Build**: Needs `wails build` command
 
 ### String Replacement Features
 - **Configuration Management**: Easy setup of GitHub/Bitbucket connection
@@ -312,9 +280,8 @@ Choose between two modern GUI interfaces for both string replacement and reposit
 - **Real-Time Migration Progress**: Live tracking of all 9 migration steps
 - **Migration Results**: Complete summary with GitHub repository URL and team assignments
 
-Launch options:
-- **Fyne Native GUI**: `./go-toolgit --fyne-gui` (works with standard build)
-- **Wails Web GUI**: `./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui` (requires Wails build)
+Launch option:
+- **Fyne Native GUI**: `./go-toolgit --gui` (works with standard build)
 
 ## Examples
 
@@ -472,35 +439,27 @@ export GITHUB_REPLACE_BITBUCKET_PROJECT="PROJ"
 ### Prerequisites
 
 - Go 1.24+
-- Node.js 16+ (for GUI development)
 - Git
 
 ### Building
 
 ```bash
-# CLI only (string replacement, migration commands)
+# CLI and GUI (string replacement, migration commands)
 go build -o go-toolgit
 
-# GUI application (includes migration wizard)
-wails build
-
-# Development mode with live reload (GUI)
-wails dev
-
-# Note: The CLI binary works standalone but cannot launch GUI
-# The Wails-built binary includes both CLI and GUI capabilities
+# Note: The binary includes both CLI and GUI capabilities
 ```
 
 ### Running the Application
 
 ```bash
-# CLI Commands (use standard binary)
+# CLI Commands
 ./go-toolgit validate
 ./go-toolgit migrate --source-bitbucket-url "..." --target-github-org "..."
 ./go-toolgit replace --replacements "old=new"
 
-# GUI Interface (requires Wails-built binary)
-./build/bin/go-toolgit.app/Contents/MacOS/go-toolgit --gui
+# GUI Interface
+./go-toolgit --gui
 ```
 
 ### Project Structure
@@ -515,8 +474,7 @@ go-toolgit/
 │   ├── processor/       # String replacement engine
 │   ├── git/             # Git operations
 │   └── utils/           # Utilities (logging, errors, spinners)
-├── internal/gui/         # GUI-specific handlers
-├── frontend/             # Web frontend (HTML/CSS/JS)
+├── internal/fyne-gui/    # Fyne native GUI implementation
 └── main.go              # Application entry point
 ```
 
@@ -602,6 +560,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - [Cobra](https://github.com/spf13/cobra) - CLI framework
-- [Wails](https://wails.io/) - GUI framework
+- [Fyne](https://fyne.io/) - GUI framework
 - [yacspin](https://github.com/theckman/yacspin) - CLI spinners
 - [Viper](https://github.com/spf13/viper) - Configuration management

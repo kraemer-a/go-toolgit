@@ -8,21 +8,20 @@ import (
 	"fyne.io/fyne/v2/theme"
 
 	"go-toolgit/internal/core/utils"
-	"go-toolgit/internal/gui"
 )
 
 // Mock GUI service for testing
 type mockGUIService struct{}
 
-func (m *mockGUIService) ListRepositories() ([]gui.Repository, error) {
-	return []gui.Repository{
+func (m *mockGUIService) ListRepositories() ([]Repository, error) {
+	return []Repository{
 		{Name: "repo1", FullName: "org/repo1"},
 		{Name: "repo2", FullName: "org/repo2"},
 	}, nil
 }
 
-func (m *mockGUIService) ProcessReplacements(rules []gui.ReplacementRule, repos []gui.Repository, options gui.ProcessingOptions) (*gui.ProcessingResult, error) {
-	return &gui.ProcessingResult{
+func (m *mockGUIService) ProcessReplacements(rules []ReplacementRule, repos []Repository, options ProcessingOptions) (*ProcessingResult, error) {
+	return &ProcessingResult{
 		Success: true,
 		Message: "Test processing completed",
 	}, nil
@@ -34,7 +33,7 @@ func (m *mockGUIService) ValidateConfiguration() error {
 
 func createTestApp() *FyneApp {
 	logger := utils.NewLogger("info", "text")
-	guiService := &gui.Service{}
+	guiService := NewService(nil, logger)
 
 	fyneApp := test.NewApp()
 	modernTheme := NewModernTheme(true)
