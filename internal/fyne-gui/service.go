@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -121,8 +122,55 @@ func NewService(cfg *config.Config, logger *utils.Logger) *Service {
 	}
 }
 
+// SaveConfig saves the current configuration to disk
+func (s *Service) SaveConfig(configData ConfigData) error {
+	// Update viper configuration values
+	viper.Set("provider", configData.Provider)
+	viper.Set("github.base_url", configData.GitHubURL)
+	viper.Set("github.token", configData.Token)
+	viper.Set("github.organization", configData.Organization)
+	viper.Set("github.team", configData.Team)
+	viper.Set("processing.include_patterns", configData.IncludePatterns)
+	viper.Set("processing.exclude_patterns", configData.ExcludePatterns)
+	viper.Set("pull_request.title_template", configData.PRTitleTemplate)
+	viper.Set("pull_request.body_template", configData.PRBodyTemplate)
+	viper.Set("pull_request.branch_prefix", configData.BranchPrefix)
+	
+	// Try to write the configuration
+	if err := viper.WriteConfig(); err != nil {
+		// If the config file doesn't exist, try to create it
+		if os.IsNotExist(err) {
+			// Create config directory if it doesn't exist
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("failed to get home directory: %w", err)
+			}
+			
+			configDir := filepath.Join(home, ".go-toolgit")
+			if err := os.MkdirAll(configDir, 0755); err != nil {
+				return fmt.Errorf("failed to create config directory: %w", err)
+			}
+			
+			// Write config to the new file
+			configPath := filepath.Join(configDir, "config.yaml")
+			if err := viper.WriteConfigAs(configPath); err != nil {
+				return fmt.Errorf("failed to write config file: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to write config: %w", err)
+		}
+	}
+	
+	return nil
+}
+
 // UpdateConfig updates the service configuration and initializes clients
 func (s *Service) UpdateConfig(configData ConfigData) error {
+	// Save configuration to disk first
+	if err := s.SaveConfig(configData); err != nil {
+		return fmt.Errorf("failed to save configuration: %w", err)
+	}
+	
 	// Update config with new data
 	if configData.GitHubURL != "" {
 		s.config.GitHub.BaseURL = configData.GitHubURL
@@ -136,6 +184,28 @@ func (s *Service) UpdateConfig(configData ConfigData) error {
 	if configData.Team != "" {
 		s.config.GitHub.Team = configData.Team
 	}
+	
+	// Update processing patterns in config
+	if len(configData.IncludePatterns) > 0 {
+		s.config.Processing.IncludePatterns = configData.IncludePatterns
+	}
+	if len(configData.ExcludePatterns) > 0 {
+		s.config.Processing.ExcludePatterns = configData.ExcludePatterns
+	}
+	
+	// Update pull request config
+	if configData.PRTitleTemplate != "" {
+		s.config.PullRequest.TitleTemplate = configData.PRTitleTemplate
+	}
+	if configData.PRBodyTemplate != "" {
+		s.config.PullRequest.BodyTemplate = configData.PRBodyTemplate
+	}
+	if configData.BranchPrefix != "" {
+		s.config.PullRequest.BranchPrefix = configData.BranchPrefix
+	}
+	
+	// Update provider
+	s.config.Provider = configData.Provider
 
 	// Create GitHub client config
 	githubConfig := &github.Config{
