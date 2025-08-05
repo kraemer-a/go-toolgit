@@ -74,6 +74,16 @@ func Load() (*Config, error) {
 	return &config, nil
 }
 
+// LoadSecure loads configuration with automatic decryption of sensitive fields
+func LoadSecure() (*Config, error) {
+	scm, err := NewSecureConfigManager()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create secure config manager: %w", err)
+	}
+
+	return scm.LoadSecureConfig()
+}
+
 func setDefaults() {
 	viper.SetDefault("github.base_url", "https://api.github.com")
 	viper.SetDefault("github.timeout", "30s")

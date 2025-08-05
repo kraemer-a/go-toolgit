@@ -216,6 +216,93 @@ func (mr *MemoryRepository) Push(ctx context.Context, branchName string) error {
 	return nil
 }
 
+// PushToRemote pushes the branch to a different remote repository
+func (mr *MemoryRepository) PushToRemote(ctx context.Context, remoteURL, branchName, token string) error {
+	// Create authentication for the new remote
+	auth := &http.BasicAuth{
+		Username: "git", // Can be anything for GitHub PAT
+		Password: token,
+	}
+
+	// Add the new remote
+	_, err := mr.repo.CreateRemote(&config.RemoteConfig{
+		Name: "migration-target",
+		URLs: []string{remoteURL},
+	})
+	if err != nil {
+		// If remote already exists, get it
+		_, err = mr.repo.Remote("migration-target")
+		if err != nil {
+			return fmt.Errorf("failed to create or get migration-target remote: %w", err)
+		}
+	}
+
+	// Push the branch to the new remote
+	err = mr.repo.PushContext(ctx, &git.PushOptions{
+		RemoteName: "migration-target",
+		RefSpecs: []config.RefSpec{
+			config.RefSpec("refs/heads/" + branchName + ":refs/heads/" + branchName),
+		},
+		Auth: auth,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to push branch %s to migration target: %w", branchName, err)
+	}
+
+	return nil
+}
+
+// PushAllBranchesToRemote pushes all branches to a different remote repository
+func (mr *MemoryRepository) PushAllBranchesToRemote(ctx context.Context, remoteURL, token string) error {
+	// Create authentication for the new remote
+	auth := &http.BasicAuth{
+		Username: "git", // Can be anything for GitHub PAT
+		Password: token,
+	}
+
+	// Add the new remote
+	_, err := mr.repo.CreateRemote(&config.RemoteConfig{
+		Name: "migration-target",
+		URLs: []string{remoteURL},
+	})
+	if err != nil {
+		// If remote already exists, that's fine
+		if err.Error() != "remote already exists" {
+			return fmt.Errorf("failed to create migration-target remote: %w", err)
+		}
+	}
+
+	// Get all branches
+	refs, err := mr.repo.References()
+	if err != nil {
+		return fmt.Errorf("failed to get references: %w", err)
+	}
+
+	var refSpecs []config.RefSpec
+	err = refs.ForEach(func(ref *plumbing.Reference) error {
+		if ref.Name().IsBranch() {
+			refSpec := config.RefSpec(ref.Name() + ":" + ref.Name())
+			refSpecs = append(refSpecs, refSpec)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to iterate references: %w", err)
+	}
+
+	// Push all branches to the new remote
+	err = mr.repo.PushContext(ctx, &git.PushOptions{
+		RemoteName: "migration-target",
+		RefSpecs:   refSpecs,
+		Auth:       auth,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to push all branches to migration target: %w", err)
+	}
+
+	return nil
+}
+
 // HasChanges checks if there are any modified files
 func (mr *MemoryRepository) HasChanges() (bool, error) {
 	worktree, err := mr.repo.Worktree()

@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
+	"go-toolgit/internal/core/bitbucket"
 	"go-toolgit/internal/core/config"
 	"go-toolgit/internal/core/git"
 	"go-toolgit/internal/core/github"
@@ -129,21 +131,50 @@ func NewService(cfg *config.Config, logger *utils.Logger) *Service {
 	}
 }
 
-// SaveConfig saves the current configuration to disk
+// SaveConfig saves the current configuration to disk with automatic encryption
 func (s *Service) SaveConfig(configData ConfigData) error {
-	// Update viper configuration values
-	viper.Set("provider", configData.Provider)
-	viper.Set("github.base_url", configData.GitHubURL)
-	viper.Set("github.token", configData.Token)
-	viper.Set("github.organization", configData.Organization)
-	viper.Set("github.team", configData.Team)
-	viper.Set("processing.include_patterns", configData.IncludePatterns)
-	viper.Set("processing.exclude_patterns", configData.ExcludePatterns)
-	viper.Set("pull_request.title_template", configData.PRTitleTemplate)
-	viper.Set("pull_request.body_template", configData.PRBodyTemplate)
-	viper.Set("pull_request.branch_prefix", configData.BranchPrefix)
-	
-	// Save migration settings (always set, even if empty to allow clearing)
+	// Create secure config manager
+	scm, err := config.NewSecureConfigManager()
+	if err != nil {
+		return fmt.Errorf("failed to create secure config manager: %w", err)
+	}
+
+	// Convert ConfigData to Config struct
+	cfg := &config.Config{
+		Provider: configData.Provider,
+		GitHub: config.GitHubConfig{
+			BaseURL:          configData.GitHubURL,
+			Token:            configData.Token,
+			Org:              configData.Organization,
+			Team:             configData.Team,
+			Timeout:          s.config.GitHub.Timeout,
+			MaxRetries:       s.config.GitHub.MaxRetries,
+			WaitForRateLimit: s.config.GitHub.WaitForRateLimit,
+		},
+		Bitbucket: config.BitbucketConfig{
+			BaseURL:    s.config.Bitbucket.BaseURL,
+			Username:   s.config.Bitbucket.Username,
+			Password:   s.config.Bitbucket.Password,
+			Project:    s.config.Bitbucket.Project,
+			Timeout:    s.config.Bitbucket.Timeout,
+			MaxRetries: s.config.Bitbucket.MaxRetries,
+		},
+		Processing: config.ProcessingConfig{
+			IncludePatterns: configData.IncludePatterns,
+			ExcludePatterns: configData.ExcludePatterns,
+			MaxWorkers:      s.config.Processing.MaxWorkers,
+		},
+		PullRequest: config.PullRequestConfig{
+			TitleTemplate: configData.PRTitleTemplate,
+			BodyTemplate:  configData.PRBodyTemplate,
+			BranchPrefix:  configData.BranchPrefix,
+			AutoMerge:     s.config.PullRequest.AutoMerge,
+			DeleteBranch:  s.config.PullRequest.DeleteBranch,
+		},
+		Logging: s.config.Logging,
+	}
+
+	// Save migration settings to viper (these are not encrypted)
 	viper.Set("migration.source_url", configData.MigrationSourceURL)
 	viper.Set("migration.target_org", configData.MigrationTargetOrg)
 	viper.Set("migration.target_repo", configData.MigrationTargetRepo)
@@ -152,8 +183,8 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 	
 	// Always try current directory first
 	currentDirConfig := "./config.yaml"
-	if err := viper.WriteConfigAs(currentDirConfig); err == nil {
-		s.logger.Info("Saved config to current directory", "path", currentDirConfig)
+	if err := scm.SaveSecureConfigToFile(cfg, currentDirConfig); err == nil {
+		s.logger.Info("Saved encrypted config to current directory", "path", currentDirConfig)
 		return nil
 	}
 	
@@ -169,11 +200,11 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 	}
 	
 	configPath := filepath.Join(configDir, "config.yaml")
-	if err := viper.WriteConfigAs(configPath); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+	if err := scm.SaveSecureConfigToFile(cfg, configPath); err != nil {
+		return fmt.Errorf("failed to write encrypted config file: %w", err)
 	}
 	
-	s.logger.Info("Saved config to home directory", "path", configPath)
+	s.logger.Info("Saved encrypted config to home directory", "path", configPath)
 	return nil
 }
 
@@ -471,66 +502,101 @@ func (s *Service) ValidateMigrationConfig(config MigrationConfig) error {
 
 // MigrateRepository performs repository migration from Bitbucket to GitHub
 func (s *Service) MigrateRepository(config MigrationConfig) (*MigrationResult, error) {
-	// This is a placeholder implementation
-	// In a real implementation, this would handle the complex migration process
-	steps := []MigrationStep{
-		{
-			Description: "Validating source repository",
-			Status:      "completed",
-			Progress:    100,
-			Message:     "Source repository validated",
-		},
-		{
-			Description: "Creating target repository",
-			Status:      "completed",
-			Progress:    100,
-			Message:     "Target repository created",
-		},
-		{
-			Description: "Cloning source repository",
-			Status:      "completed",
-			Progress:    100,
-			Message:     "Source repository cloned",
-		},
-		{
-			Description: "Pushing to target repository",
-			Status:      "completed",
-			Progress:    100,
-			Message:     "Code pushed to target repository",
-		},
+	ctx := context.Background()
+
+	// Create Bitbucket client if Bitbucket configuration is available
+	bitbucketClient, err := s.createBitbucketClient()
+	if err != nil {
+		return &MigrationResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to initialize Bitbucket client: %v", err),
+			Steps: []MigrationStep{
+				{Description: "Initialize Bitbucket client", Status: "failed", Progress: 0, Message: err.Error()},
+			},
+		}, err
 	}
 
-	if config.DryRun {
-		// For dry run, mark all steps as pending
+	// Create migration service with progress callback
+	var steps []MigrationStep
+	progressCallback := func(step MigrationStep) {
+		// Update the steps slice - find and update the matching step
 		for i := range steps {
-			steps[i].Status = "pending"
-			steps[i].Progress = 0
-			steps[i].Message = "Would " + steps[i].Description
+			if steps[i].Description == step.Description {
+				steps[i] = step
+				break
+			}
 		}
 	}
 
-	result := &MigrationResult{
-		Success:       !config.DryRun,
-		Message:       "Migration completed successfully",
-		GitHubRepoURL: fmt.Sprintf("https://github.com/%s/%s", config.TargetGitHubOrg, config.TargetRepositoryName),
-		Steps:         steps,
+	migrationService := NewMigrationService(s.githubClient, s.gitOps, &config, s.config.GitHub.Token, progressCallback)
+	if bitbucketClient != nil {
+		migrationService.SetBitbucketClient(bitbucketClient)
 	}
 
-	if config.DryRun {
-		result.Message = "Migration dry run completed - no actual changes made"
+	// Initialize steps for tracking
+	steps = []MigrationStep{
+		{Description: "Validating source repository", Status: "pending", Progress: 0},
+		{Description: "Creating target repository", Status: "pending", Progress: 0},
+		{Description: "Cloning source repository", Status: "pending", Progress: 0},
+		{Description: "Pushing to target repository", Status: "pending", Progress: 0},
+		{Description: "Configuring teams", Status: "pending", Progress: 0},
+		{Description: "Setting up webhooks", Status: "pending", Progress: 0},
 	}
 
+	// Perform the actual migration
+	result, err := migrationService.MigrateRepositoryImpl(ctx)
+	if err != nil {
+		s.logger.Error("Migration failed", "error", err)
+		return result, err
+	}
+
+	s.logger.Info("Migration completed", "success", result.Success, "message", result.Message)
 	return result, nil
 }
 
-// ReadConfigFromFile reads configuration from a file
+// createBitbucketClient creates a Bitbucket client from secure configuration
+func (s *Service) createBitbucketClient() (*bitbucket.Client, error) {
+	// Load secure configuration to get decrypted Bitbucket password
+	cfg, err := config.LoadSecure()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load secure configuration: %w", err)
+	}
+	
+	if cfg.Bitbucket.BaseURL == "" || cfg.Bitbucket.Username == "" || cfg.Bitbucket.Password == "" {
+		// Return nil client if Bitbucket is not configured - migration service will handle this
+		return nil, fmt.Errorf("Bitbucket configuration incomplete - base_url, username, and password/app_password required")
+	}
+
+	timeout := cfg.Bitbucket.Timeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+
+	maxRetries := cfg.Bitbucket.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = 3
+	}
+
+	bitbucketConfig := &bitbucket.Config{
+		BaseURL:    cfg.Bitbucket.BaseURL,
+		Username:   cfg.Bitbucket.Username,
+		Password:   cfg.Bitbucket.Password, // This is automatically decrypted
+		Timeout:    timeout,
+		MaxRetries: maxRetries,
+	}
+
+	return bitbucket.NewClient(bitbucketConfig)
+}
+
+// ReadConfigFromFile reads configuration from a file with automatic decryption
 func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 	// Initialize viper if not already configured
 	initializeViper()
 	
-	cfg, err := config.Load()
+	// Use secure config loading to automatically decrypt sensitive fields
+	cfg, err := config.LoadSecure()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load configuration: %w", err)
+		return nil, fmt.Errorf("failed to load secure configuration: %w", err)
 	}
 
 	// Use provider from config, default to github if not set
@@ -542,7 +608,7 @@ func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 	return &ConfigData{
 		Provider:        provider,
 		GitHubURL:       cfg.GitHub.BaseURL,
-		Token:           cfg.GitHub.Token,
+		Token:           cfg.GitHub.Token, // This is now automatically decrypted
 		Organization:    cfg.GitHub.Org,
 		Team:            cfg.GitHub.Team,
 		IncludePatterns: cfg.Processing.IncludePatterns,
