@@ -407,13 +407,18 @@ func (s *Service) ProcessReplacements(rules []ReplacementRule, repos []Repositor
 			}
 		}
 
-		// For dry run, simulate diffs (this would need actual diff generation)
-		if options.DryRun && len(result.FilesChanged) > 0 {
+		// For dry run, generate actual diffs from FileChanges
+		if options.DryRun && len(result.FileChanges) > 0 {
 			fileDiffs := make(map[string]string)
-			for _, file := range result.FilesChanged {
-				fileDiffs[file] = fmt.Sprintf("--- %s (original)\n+++ %s (modified)\n@@ -1,1 +1,1 @@\n-Original content\n+Modified content", file, file)
+			for _, fileChange := range result.FileChanges {
+				diff := s.generateDiffFromFileChange(fileChange)
+				if diff != "" {
+					fileDiffs[fileChange.FilePath] = diff
+				}
 			}
-			diffs[repo.FullName] = fileDiffs
+			if len(fileDiffs) > 0 {
+				diffs[repo.FullName] = fileDiffs
+			}
 		}
 
 		repoResults = append(repoResults, repoResult)
@@ -586,6 +591,46 @@ func initializeViper() {
 	// Try to read the config file
 	viper.ReadInConfig()
 }
+
+// generateDiffFromFileChange generates a unified diff from FileChange data
+func (s *Service) generateDiffFromFileChange(fileChange *processor.FileChange) string {
+	if fileChange == nil || len(fileChange.StringChanges) == 0 {
+		return ""
+	}
+	
+	var diff strings.Builder
+	
+	// Write file header
+	diff.WriteString(fmt.Sprintf("--- %s (original)\n", fileChange.FilePath))
+	diff.WriteString(fmt.Sprintf("+++ %s (modified)\n", fileChange.FilePath))
+	
+	// Generate diff for each change
+	for i, change := range fileChange.StringChanges {
+		// Add hunk header for each change
+		diff.WriteString(fmt.Sprintf("@@ -%d,1 +%d,1 @@ Change %d of %d\n", 
+			change.LineNumber, change.LineNumber, i+1, len(fileChange.StringChanges)))
+		
+		// If we have context, show it first
+		if change.Context != "" {
+			// Show context line with the original string highlighted
+			contextWithOriginal := change.Context
+			diff.WriteString(fmt.Sprintf("- %s\n", contextWithOriginal))
+			
+			// Show context line with the replacement string
+			contextWithReplacement := strings.Replace(change.Context, change.Original, change.Replacement, -1)
+			diff.WriteString(fmt.Sprintf("+ %s\n", contextWithReplacement))
+		} else {
+			// No context, just show the raw change
+			diff.WriteString(fmt.Sprintf("- %s\n", change.Original))
+			diff.WriteString(fmt.Sprintf("+ %s\n", change.Replacement))
+		}
+		
+		diff.WriteString("\n")
+	}
+	
+	return diff.String()
+}
+
 
 // setDefaults sets default configuration values
 func setDefaults() {
