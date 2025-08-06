@@ -597,6 +597,8 @@ func (s *Service) MigrateRepository(config MigrationConfig) (*MigrationResult, e
 	migrationService := NewMigrationService(s.githubClient, s.gitOps, &config, s.config.GitHub.Token, progressCallback)
 	if bitbucketClient != nil {
 		migrationService.SetBitbucketClient(bitbucketClient)
+		// Set Bitbucket credentials for authentication
+		migrationService.SetBitbucketCredentials(s.config.Bitbucket.Username, s.config.Bitbucket.Password)
 	}
 
 	// Initialize steps for tracking

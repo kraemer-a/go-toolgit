@@ -13,12 +13,14 @@ import (
 
 // MigrationService handles repository migration from Bitbucket to GitHub
 type MigrationService struct {
-	githubClient     *github.Client
-	bitbucketClient  *bitbucket.Client
-	gitOps           *git.MemoryOperations
-	config           *MigrationConfig
-	githubToken      string
-	progressCallback func(step MigrationStep)
+	githubClient      *github.Client
+	bitbucketClient   *bitbucket.Client
+	gitOps            *git.MemoryOperations
+	config            *MigrationConfig
+	githubToken       string
+	bitbucketUsername string
+	bitbucketPassword string
+	progressCallback  func(step MigrationStep)
 }
 
 // NewMigrationService creates a new migration service
@@ -226,10 +228,25 @@ func (ms *MigrationService) cloneFromBitbucket(ctx context.Context, bitbucketRep
 		return nil, fmt.Errorf("no clone URL available for repository")
 	}
 
-	// Clone using go-git memory operations
-	memoryRepo, err := ms.gitOps.CloneRepository(ctx, cloneURL, bitbucketRepo.FullName)
+	// Convert SSH URL to HTTPS if needed
+	httpsURL, err := ms.convertSSHToHTTPS(cloneURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to clone repository: %w", err)
+		return nil, fmt.Errorf("failed to convert SSH URL to HTTPS: %w", err)
+	}
+
+	// Create Bitbucket-specific git operations with proper credentials
+	if ms.bitbucketUsername == "" || ms.bitbucketPassword == "" {
+		return nil, fmt.Errorf("Bitbucket credentials not configured - username and password required for authentication")
+	}
+
+	// Create token in the format expected by git operations (username:password for basic auth)
+	bitbucketAuth := fmt.Sprintf("%s:%s", ms.bitbucketUsername, ms.bitbucketPassword)
+	bitbucketGitOps := git.NewMemoryOperations(bitbucketAuth)
+
+	// Clone using Bitbucket-authenticated git operations
+	memoryRepo, err := bitbucketGitOps.CloneRepository(ctx, httpsURL, bitbucketRepo.FullName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to clone repository %s: %w", bitbucketRepo.FullName, err)
 	}
 
 	return memoryRepo, nil
@@ -300,4 +317,42 @@ func (ms *MigrationService) updateStep(step *MigrationStep, status string, progr
 // SetBitbucketClient sets the Bitbucket client for the migration service
 func (ms *MigrationService) SetBitbucketClient(client *bitbucket.Client) {
 	ms.bitbucketClient = client
+}
+
+// SetBitbucketCredentials sets the Bitbucket authentication credentials
+func (ms *MigrationService) SetBitbucketCredentials(username, password string) {
+	ms.bitbucketUsername = username
+	ms.bitbucketPassword = password
+}
+
+// convertSSHToHTTPS converts SSH URL to HTTPS format for authentication
+func (ms *MigrationService) convertSSHToHTTPS(sshURL string) (string, error) {
+	// Parse the SSH URL
+	parsedURL, err := url.Parse(sshURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse SSH URL: %w", err)
+	}
+
+	// Handle SSH URL format: ssh://git@host:port/path/repo.git
+	if parsedURL.Scheme == "ssh" {
+		// Extract hostname and port
+		host := parsedURL.Hostname()
+		port := parsedURL.Port()
+
+		// Convert to HTTPS format
+		httpsURL := fmt.Sprintf("https://%s", host)
+		if port != "" && port != "22" && port != "443" {
+			// Only add port if it's not the default ports
+			httpsURL = fmt.Sprintf("https://%s:%s", host, port)
+		}
+
+		// Add the path (remove leading slash and git@ user)
+		path := strings.TrimPrefix(parsedURL.Path, "/")
+		httpsURL = fmt.Sprintf("%s/%s", httpsURL, path)
+
+		return httpsURL, nil
+	}
+
+	// If it's already HTTPS or another format, return as-is
+	return sshURL, nil
 }
