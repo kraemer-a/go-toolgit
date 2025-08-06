@@ -46,36 +46,34 @@ func (a *AdwaitaVariantTheme) Size(name fyne.ThemeSizeName) float32 {
 }
 
 type FyneApp struct {
-	app         fyne.App
-	window      fyne.Window
-	service     *Service
-	logger      *utils.Logger
-	modernTheme *ModernTheme
+	app              fyne.App
+	window           fyne.Window
+	service          *Service
+	logger           *utils.Logger
+	modernTheme      *ModernTheme
 	currentThemeType string // "Modern" or "Adwaita"
-	isDarkMode  bool
+	isDarkMode       bool
 
 	// Current tab
 	currentTab *container.AppTabs
 
 	// Config widgets
-	providerSelect *widget.Select
-	
+	providerSelect *widget.RadioGroup
+
 	// GitHub-specific widget instances
-	githubURLEntry    *widget.Entry
-	githubTokenEntry  *widget.Entry
-	githubOrgEntry    *widget.Entry
-	githubTeamEntry   *widget.Entry
-	
-	// Bitbucket-specific widget instances  
+	githubURLEntry   *widget.Entry
+	githubTokenEntry *widget.Entry
+	githubOrgEntry   *widget.Entry
+	githubTeamEntry  *widget.Entry
+
+	// Bitbucket-specific widget instances
 	bitbucketURLEntry      *widget.Entry
 	bitbucketUsernameEntry *widget.Entry
 	bitbucketPasswordEntry *widget.Entry
 	bitbucketProjectEntry  *widget.Entry
-	
-	// Dynamic form management
-	configForm        *widget.Form
-	providerContainer *fyne.Container
-	helpText          *widget.RichText
+
+	// Help text
+	helpText *widget.RichText
 
 	// String replacement widgets
 	replacementRulesContainer *fyne.Container
@@ -88,9 +86,9 @@ type FyneApp struct {
 	branchPrefixEntry         *widget.Entry
 
 	// Repository filtering
-	repoFilterEntry           *widget.Entry
-	filteredRepositories      []Repository
-	repoWidgets              []*fyne.Container
+	repoFilterEntry      *widget.Entry
+	filteredRepositories []Repository
+	repoWidgets          []*fyne.Container
 
 	// Migration widgets
 	sourceURLEntry    *widget.Entry
@@ -101,8 +99,8 @@ type FyneApp struct {
 	progressContainer *fyne.Container
 
 	// Status
-	statusLabel *widget.Label
-	statusIcon  *widget.Icon
+	statusLabel     *widget.Label
+	statusIcon      *widget.Icon
 	rateLimitStatus *RateLimitStatus
 	operationStatus *OperationStatus
 
@@ -112,11 +110,17 @@ type FyneApp struct {
 	// Loading indicators
 	loadingOverlay *LoadingContainer
 	mainContent    *fyne.Container
+
+	// Saved configuration for restoring after widget recreation
+	lastLoadedConfig *ConfigData
+
+	// Track which fields have been modified by the user during the current session
+	modifiedFields map[string]bool
 }
 
 func NewFyneApp() *FyneApp {
 	cfg, _ := config.Load()
-	
+
 	// Use configured log level, default to info if config loading failed
 	logLevel := "info"
 	logFormat := "text"
@@ -124,7 +128,7 @@ func NewFyneApp() *FyneApp {
 		logLevel = cfg.Logging.Level
 		logFormat = cfg.Logging.Format
 	}
-	
+
 	logger := utils.NewLogger(logLevel, logFormat)
 
 	fyneApp := app.NewWithID("com.github.go-toolgit")
@@ -138,7 +142,7 @@ func NewFyneApp() *FyneApp {
 	fyneApp.Settings().SetTheme(adwaitaTheme)
 
 	window := fyneApp.NewWindow("GitHub & Bitbucket DevOps Tool")
-	window.Resize(fyne.NewSize(1200, 1000))
+	window.Resize(fyne.NewSize(1400, 1200))
 	window.CenterOnScreen()
 
 	service := NewService(cfg, logger)
@@ -151,6 +155,7 @@ func NewFyneApp() *FyneApp {
 		modernTheme:      modernTheme.(*ModernTheme),
 		currentThemeType: "Adwaita",
 		isDarkMode:       true,
+		modifiedFields:   make(map[string]bool),
 	}
 }
 
@@ -159,6 +164,17 @@ func (f *FyneApp) Run() {
 	f.loadConfigurationFromFile() // Load config and prefill GUI
 	f.startRateLimitRefreshTimer()
 	f.window.ShowAndRun()
+}
+
+// markFieldAsModified marks a field as modified by the user during the current session
+func (f *FyneApp) markFieldAsModified(fieldName string) {
+	f.modifiedFields[fieldName] = true
+	f.logger.Debug("Field marked as modified", "field", fieldName)
+}
+
+// isFieldModified checks if a field has been modified by the user during the current session
+func (f *FyneApp) isFieldModified(fieldName string) bool {
+	return f.modifiedFields[fieldName]
 }
 
 // getCurrentTheme returns the appropriate theme based on current settings
@@ -183,10 +199,10 @@ func (f *FyneApp) getCurrentTheme() fyne.Theme {
 func (f *FyneApp) applyTheme() {
 	currentTheme := f.getCurrentTheme()
 	f.app.Settings().SetTheme(currentTheme)
-	
+
 	// Force refresh of the entire UI
 	f.window.Content().Refresh()
-	
+
 	// Show feedback to user
 	themeMode := "light"
 	if f.isDarkMode {
@@ -230,17 +246,17 @@ func (f *FyneApp) setupUI() {
 	f.statusLabel.TextStyle = fyne.TextStyle{Bold: true}
 	f.statusLabel.Alignment = fyne.TextAlignCenter
 	f.statusIcon = widget.NewIcon(theme.InfoIcon())
-	
+
 	// Create rate limit status widget with refresh callback
 	f.rateLimitStatus = NewRateLimitStatus(f.refreshRateLimit)
-	
+
 	// Create operation status widget
 	f.operationStatus = NewOperationStatus()
 
 	// Create a more compact layout with main status on left, API info on right
 	leftStatus := container.NewHBox(f.statusIcon, container.NewCenter(f.statusLabel))
 	rightStatus := container.NewHBox(f.operationStatus, widget.NewSeparator(), f.rateLimitStatus)
-	
+
 	statusContent := container.New(
 		layout.NewBorderLayout(nil, nil, leftStatus, rightStatus),
 		leftStatus,
@@ -273,20 +289,141 @@ func (f *FyneApp) setupUI() {
 }
 
 func (f *FyneApp) createConfigTab() *fyne.Container {
-	// Provider selection with callback
-	f.providerSelect = widget.NewSelect([]string{"github", "bitbucket"}, func(selected string) {
-		f.logger.Info("Provider selected", "provider", selected)
-		// Clear values when user manually switches providers to prevent cross-contamination
-		f.updateProviderFieldsWithClear(selected, true)
+	// Create GitHub fields
+	f.githubURLEntry = widget.NewEntry()
+	f.githubURLEntry.SetPlaceHolder("https://api.github.com")
+	f.githubURLEntry.OnChanged = func(content string) {
+		f.markFieldAsModified("github.url")
+	}
+
+	f.githubTokenEntry = widget.NewPasswordEntry()
+	f.githubTokenEntry.SetPlaceHolder("ghp_xxxxxxxxxxxxxxxx")
+	f.githubTokenEntry.OnChanged = func(content string) {
+		f.markFieldAsModified("github.token")
+	}
+
+	f.githubOrgEntry = widget.NewEntry()
+	f.githubOrgEntry.SetPlaceHolder("my-organization (optional)")
+	f.githubOrgEntry.OnChanged = func(content string) {
+		f.markFieldAsModified("github.org")
+	}
+
+	f.githubTeamEntry = widget.NewEntry()
+	f.githubTeamEntry.SetPlaceHolder("my-team (optional)")
+	f.githubTeamEntry.OnChanged = func(content string) {
+		f.markFieldAsModified("github.team")
+	}
+
+	// Create Bitbucket fields
+	f.bitbucketURLEntry = widget.NewEntry()
+	f.bitbucketURLEntry.SetPlaceHolder("https://api.bitbucket.org")
+	f.bitbucketURLEntry.OnChanged = func(content string) {
+		f.markFieldAsModified("bitbucket.url")
+	}
+
+	f.bitbucketUsernameEntry = widget.NewEntry()
+	f.bitbucketUsernameEntry.SetPlaceHolder("your-username")
+	f.bitbucketUsernameEntry.Password = false
+	f.bitbucketUsernameEntry.OnChanged = func(content string) {
+		f.markFieldAsModified("bitbucket.username")
+	}
+
+	f.bitbucketPasswordEntry = widget.NewPasswordEntry()
+	f.bitbucketPasswordEntry.SetPlaceHolder("your-app-password")
+	f.bitbucketPasswordEntry.OnChanged = func(content string) {
+		f.markFieldAsModified("bitbucket.password")
+	}
+
+	f.bitbucketProjectEntry = widget.NewEntry()
+	f.bitbucketProjectEntry.SetPlaceHolder("PROJECT-KEY")
+	f.bitbucketProjectEntry.OnChanged = func(content string) {
+		f.markFieldAsModified("bitbucket.project")
+	}
+
+	// Create GitHub form with grid layout for better alignment
+	githubURLLabel := widget.NewLabel("GitHub URL:")
+	githubURLLabel.TextStyle = fyne.TextStyle{Bold: true}
+	githubOrgLabel := widget.NewLabel("Organization (Optional):")
+	githubOrgLabel.TextStyle = fyne.TextStyle{Bold: true}
+	githubTeamLabel := widget.NewLabel("Team (Optional):")
+	githubTeamLabel.TextStyle = fyne.TextStyle{Bold: true}
+	githubTokenLabel := widget.NewLabel("Personal Access Token:")
+	githubTokenLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	// Create hint labels
+	githubURLHint := widget.NewLabel("API endpoint (e.g., https://api.github.com)")
+	githubURLHint.TextStyle = fyne.TextStyle{Italic: true}
+	githubOrgHint := widget.NewLabel("Your organization name (required for Enterprise/Teams)")
+	githubOrgHint.TextStyle = fyne.TextStyle{Italic: true}
+	githubTeamHint := widget.NewLabel("Your team slug (required for Team access)")
+	githubTeamHint.TextStyle = fyne.TextStyle{Italic: true}
+	githubTokenHint := widget.NewLabel("GitHub PAT with repo and org:read permissions")
+	githubTokenHint.TextStyle = fyne.TextStyle{Italic: true}
+
+	// Use GridWithColumns for consistent column width
+	githubForm := container.New(
+		layout.NewGridLayoutWithColumns(2),
+		githubURLLabel, f.githubURLEntry,
+		widget.NewLabel(""), githubURLHint,
+		githubOrgLabel, f.githubOrgEntry,
+		widget.NewLabel(""), githubOrgHint,
+		githubTeamLabel, f.githubTeamEntry,
+		widget.NewLabel(""), githubTeamHint,
+		githubTokenLabel, f.githubTokenEntry,
+		widget.NewLabel(""), githubTokenHint,
+	)
+
+	// Create Bitbucket form with grid layout for better alignment
+	bitbucketURLLabel := widget.NewLabel("Bitbucket URL:")
+	bitbucketURLLabel.TextStyle = fyne.TextStyle{Bold: true}
+	bitbucketProjectLabel := widget.NewLabel("Project Key:")
+	bitbucketProjectLabel.TextStyle = fyne.TextStyle{Bold: true}
+	bitbucketUsernameLabel := widget.NewLabel("Username:")
+	bitbucketUsernameLabel.TextStyle = fyne.TextStyle{Bold: true}
+	bitbucketPasswordLabel := widget.NewLabel("Password:")
+	bitbucketPasswordLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	// Create hint labels
+	bitbucketURLHint := widget.NewLabel("API endpoint (e.g., https://api.bitbucket.org)")
+	bitbucketURLHint.TextStyle = fyne.TextStyle{Italic: true}
+	bitbucketProjectHint := widget.NewLabel("Your Bitbucket project key (e.g., MYPROJ)")
+	bitbucketProjectHint.TextStyle = fyne.TextStyle{Italic: true}
+	bitbucketUsernameHint := widget.NewLabel("Your Bitbucket username")
+	bitbucketUsernameHint.TextStyle = fyne.TextStyle{Italic: true}
+	bitbucketPasswordHint := widget.NewLabel("Bitbucket app password with repository permissions")
+	bitbucketPasswordHint.TextStyle = fyne.TextStyle{Italic: true}
+
+	// Use GridWithColumns for consistent column width
+	bitbucketForm := container.New(
+		layout.NewGridLayoutWithColumns(2),
+		bitbucketURLLabel, f.bitbucketURLEntry,
+		widget.NewLabel(""), bitbucketURLHint,
+		bitbucketProjectLabel, f.bitbucketProjectEntry,
+		widget.NewLabel(""), bitbucketProjectHint,
+		bitbucketUsernameLabel, f.bitbucketUsernameEntry,
+		widget.NewLabel(""), bitbucketUsernameHint,
+		bitbucketPasswordLabel, f.bitbucketPasswordEntry,
+		widget.NewLabel(""), bitbucketPasswordHint,
+	)
+
+	// Create cards for each provider
+	githubCard := widget.NewCard("GitHub Configuration", "Setup your GitHub access", githubForm)
+	bitbucketCard := widget.NewCard("Bitbucket Configuration", "Setup your Bitbucket access", bitbucketForm)
+
+	// Provider selection for internal use (which provider to use for operations)
+	f.providerSelect = widget.NewRadioGroup([]string{"Use GitHub", "Use Bitbucket"}, func(selected string) {
+		if selected == "Use GitHub" {
+			f.providerSelect.Selected = "Use GitHub"
+			f.logger.Info("Provider selected", "provider", "github")
+		} else if selected == "Use Bitbucket" {
+			f.providerSelect.Selected = "Use Bitbucket"
+			f.logger.Info("Provider selected", "provider", "bitbucket")
+		}
 	})
-	f.providerSelect.Selected = "github"
+	f.providerSelect.SetSelected("Use GitHub")
+	f.providerSelect.Horizontal = true
 
-	// Initialize all field entries
-	f.initializeConfigFields()
-
-	// Create dynamic form
-	f.configForm = &widget.Form{}
-	f.providerContainer = container.New(layout.NewVBoxLayout())
+	providerSelectionCard := widget.NewCard("Active Provider", "Select which provider to use for operations", f.providerSelect)
 
 	// Buttons
 	validateBtn := widget.NewButtonWithIcon("Validate Configuration", theme.ConfirmIcon(), f.handleValidateConfig)
@@ -297,231 +434,56 @@ func (f *FyneApp) createConfigTab() *fyne.Container {
 
 	buttonsContainer := container.New(
 		layout.NewHBoxLayout(),
+		layout.NewSpacer(),
 		saveBtn,
 		validateBtn,
 	)
 
-	// Initialize with GitHub fields (default)
-	f.updateProviderFields("github")
+	// Create help text
+	f.helpText = widget.NewRichTextFromMarkdown(`
+### Setup Guide
 
-	configCard := widget.NewCard("Configuration", "Setup your Git provider access", f.providerContainer)
+**GitHub Setup:**
+1. Generate Personal Access Token:
+   - Go to GitHub Settings → Developer settings → Personal access tokens
+   - Create token with 'repo' and 'read:org' scopes
+2. Find Organization & Team:
+   - Use your GitHub organization name
+   - Use team slug (lowercase, hyphenated)
+3. Enterprise GitHub: Use your company's API URL
 
-	// Create dynamic help text
-	f.helpText = widget.NewRichTextFromMarkdown("")
-	f.updateHelpText("github")
+**Bitbucket Setup:**
+1. Create App Password:
+   - Go to Bitbucket Settings → App passwords
+   - Create password with 'Repositories: Read/Write' permissions
+2. Find Project Key:
+   - Visit your project page
+   - Project key is shown in uppercase (e.g., MYPROJ)
+3. Bitbucket Server: Use your company's Bitbucket URL
+
+Click "Validate Configuration" to test your connection.
+`)
 	helpCard := widget.NewCard("", "Getting Started", f.helpText)
 
+	// Create scrollable content for better layout
+	configContent := container.NewScroll(
+		container.New(
+			layout.NewVBoxLayout(),
+			providerSelectionCard,
+			bitbucketCard, // Bitbucket first
+			githubCard,    // GitHub second
+			container.NewPadded(buttonsContainer),
+			helpCard,
+		),
+	)
+
 	return container.New(
-		layout.NewVBoxLayout(),
-		configCard,
-		helpCard,
-		container.NewPadded(buttonsContainer),
+		layout.NewBorderLayout(nil, nil, nil, nil),
+		configContent,
 	)
 }
 
-// Initialize all configuration field entries with separate instances for each provider
-func (f *FyneApp) initializeConfigFields() {
-	// GitHub widget instances - all separate
-	f.githubURLEntry = widget.NewEntry()
-	f.githubURLEntry.SetPlaceHolder("https://api.github.com")
-
-	f.githubTokenEntry = widget.NewPasswordEntry()
-	f.githubTokenEntry.SetPlaceHolder("ghp_your_github_token")
-
-	f.githubOrgEntry = widget.NewEntry()
-	f.githubOrgEntry.SetPlaceHolder("your-organization")
-
-	f.githubTeamEntry = widget.NewEntry()
-	f.githubTeamEntry.SetPlaceHolder("your-team")
-
-	// Bitbucket widget instances - all separate
-	f.bitbucketURLEntry = widget.NewEntry()
-	f.bitbucketURLEntry.SetPlaceHolder("https://api.bitbucket.org")
-
-	// Create username field as regular Entry (plain text)
-	f.bitbucketUsernameEntry = widget.NewEntry()
-	f.bitbucketUsernameEntry.SetPlaceHolder("your-username")
-	// Explicitly ensure this is NOT a password field
-	f.bitbucketUsernameEntry.Password = false
-	f.logger.Info("Created Bitbucket username widget", "type", fmt.Sprintf("%T", f.bitbucketUsernameEntry), "widget_ptr", fmt.Sprintf("%p", f.bitbucketUsernameEntry), "password_property", f.bitbucketUsernameEntry.Password)
-
-	// Create password field as PasswordEntry (obfuscated)
-	f.bitbucketPasswordEntry = widget.NewPasswordEntry()
-	f.bitbucketPasswordEntry.SetPlaceHolder("your-app-password")
-	// Explicitly ensure password property is set
-	f.bitbucketPasswordEntry.Password = true
-	f.logger.Info("Created Bitbucket password widget", "type", fmt.Sprintf("%T", f.bitbucketPasswordEntry), "widget_ptr", fmt.Sprintf("%p", f.bitbucketPasswordEntry), "password_property", f.bitbucketPasswordEntry.Password)
-
-	f.bitbucketProjectEntry = widget.NewEntry()
-	f.bitbucketProjectEntry.SetPlaceHolder("PROJECT_KEY")
-}
-
-// clearAllWidgetValues clears all configuration widget values to prevent cross-contamination
-func (f *FyneApp) clearAllWidgetValues() {
-	// Clear GitHub widget instances
-	if f.githubURLEntry != nil {
-		f.githubURLEntry.SetText("")
-	}
-	if f.githubTokenEntry != nil {
-		f.githubTokenEntry.SetText("")
-	}
-	if f.githubOrgEntry != nil {
-		f.githubOrgEntry.SetText("")
-	}
-	if f.githubTeamEntry != nil {
-		f.githubTeamEntry.SetText("")
-	}
-	
-	// Clear Bitbucket widget instances
-	if f.bitbucketURLEntry != nil {
-		f.bitbucketURLEntry.SetText("")
-	}
-	if f.bitbucketUsernameEntry != nil {
-		f.bitbucketUsernameEntry.SetText("")
-	}
-	if f.bitbucketPasswordEntry != nil {
-		f.bitbucketPasswordEntry.SetText("")
-	}
-	if f.bitbucketProjectEntry != nil {
-		f.bitbucketProjectEntry.SetText("")
-	}
-}
-
-// Update form fields based on selected provider
-func (f *FyneApp) updateProviderFields(provider string) {
-	f.updateProviderFieldsWithClear(provider, false)
-}
-
-// updateProviderFieldsWithClear updates form fields and optionally clears values
-func (f *FyneApp) updateProviderFieldsWithClear(provider string, clearValues bool) {
-	f.logger.Info("Updating provider fields", "provider", provider, "clear_values", clearValues)
-	
-	// Clear existing form items
-	f.configForm.Items = []*widget.FormItem{}
-
-	// Clear widget values if requested (to prevent cross-contamination)
-	if clearValues {
-		f.clearAllWidgetValues()
-	}
-
-	// Always add provider selection first
-	f.configForm.Items = append(f.configForm.Items, &widget.FormItem{
-		Text:     "Provider",
-		Widget:   f.providerSelect,
-		HintText: "Choose your Git provider",
-	})
-
-	if provider == "github" {
-		f.addGitHubFields()
-	} else if provider == "bitbucket" {
-		f.addBitbucketFields()
-	}
-
-	// Update the provider container
-	f.providerContainer.Objects = []fyne.CanvasObject{f.configForm}
-	f.providerContainer.Refresh()
-	f.logger.Info("Provider container refreshed", "provider", provider)
-
-	// Update help text
-	f.updateHelpText(provider)
-}
-
-// Add GitHub-specific form fields using dedicated GitHub widget instances
-func (f *FyneApp) addGitHubFields() {
-	f.configForm.Items = append(f.configForm.Items, []*widget.FormItem{
-		{
-			Text:     "GitHub URL",
-			Widget:   f.githubURLEntry,
-			HintText: "API endpoint (e.g., https://api.github.com or https://github.company.com/api/v3)",
-		},
-		{
-			Text:     "Personal Access Token",
-			Widget:   f.githubTokenEntry,
-			HintText: "GitHub PAT with repo and org:read permissions",
-		},
-		{
-			Text:     "Organization",
-			Widget:   f.githubOrgEntry,
-			HintText: "Your GitHub organization name",
-		},
-		{
-			Text:     "Team",
-			Widget:   f.githubTeamEntry,
-			HintText: "Your team slug within the organization",
-		},
-	}...)
-}
-
-// Add Bitbucket-specific form fields using dedicated Bitbucket widget instances
-func (f *FyneApp) addBitbucketFields() {
-	f.logger.Info("Adding Bitbucket form fields", 
-		"username_widget_type", fmt.Sprintf("%T", f.bitbucketUsernameEntry),
-		"username_widget_ptr", fmt.Sprintf("%p", f.bitbucketUsernameEntry),
-		"username_password_prop", f.bitbucketUsernameEntry.Password,
-		"password_widget_type", fmt.Sprintf("%T", f.bitbucketPasswordEntry),
-		"password_widget_ptr", fmt.Sprintf("%p", f.bitbucketPasswordEntry),
-		"password_password_prop", f.bitbucketPasswordEntry.Password)
-	
-	f.configForm.Items = append(f.configForm.Items, []*widget.FormItem{
-		{
-			Text:     "Bitbucket URL",
-			Widget:   f.bitbucketURLEntry,
-			HintText: "API endpoint (e.g., https://api.bitbucket.org or https://bitbucket.company.com)",
-		},
-		{
-			Text:     "Username",
-			Widget:   f.bitbucketUsernameEntry,
-			HintText: "Your Bitbucket username",
-		},
-		{
-			Text:     "App Password",
-			Widget:   f.bitbucketPasswordEntry,
-			HintText: "Bitbucket app password with repository permissions",
-		},
-		{
-			Text:     "Project Key",
-			Widget:   f.bitbucketProjectEntry,
-			HintText: "Your Bitbucket project key (e.g., MYPROJ)",
-		},
-	}...)
-}
-
-// Update help text based on provider
-func (f *FyneApp) updateHelpText(provider string) {
-	if f.helpText == nil {
-		return
-	}
-
-	var helpContent string
-	if provider == "github" {
-		helpContent = `
-### GitHub Setup Guide
-1. **Generate Personal Access Token**:
-   - Go to GitHub Settings → Developer settings → Personal access tokens
-   - Create token with 'repo' and 'read:org' scopes
-2. **Find Organization & Team**:
-   - Use your GitHub organization name
-   - Use team slug (lowercase, hyphenated)
-3. **Enterprise GitHub**: Use your company's API URL
-4. Click "Validate Configuration" to test connection
-`
-	} else {
-		helpContent = `
-### Bitbucket Setup Guide
-1. **Create App Password**:
-   - Go to Bitbucket Settings → App passwords
-   - Create password with 'Repositories: Read/Write' permissions
-2. **Find Project Key**:
-   - Visit your project page
-   - Project key is shown in uppercase (e.g., MYPROJ)
-3. **Bitbucket Server**: Use your company's Bitbucket URL
-4. Click "Validate Configuration" to test connection
-`
-	}
-
-	f.helpText.ParseMarkdown(helpContent)
-	f.helpText.Refresh()
-}
+// These functions are no longer needed with the new UI layout
 
 func (f *FyneApp) createReplacementTab() *fyne.Container {
 	// Replacement rules container with scroll
@@ -579,20 +541,20 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 	// Select/Deselect all buttons
 	selectAllBtn := widget.NewButton("Select All", f.handleSelectAllRepos)
 	deselectAllBtn := widget.NewButton("Deselect All", f.handleDeselectAllRepos)
-	
+
 	// Create prominent load button section
-	loadSection := container.New(layout.NewHBoxLayout(), 
+	loadSection := container.New(layout.NewHBoxLayout(),
 		loadReposBtn,
 		layout.NewSpacer(),
 	)
-	
+
 	// Selection buttons in separate row
-	selectionButtons := container.New(layout.NewHBoxLayout(), 
-		selectAllBtn, 
+	selectionButtons := container.New(layout.NewHBoxLayout(),
+		selectAllBtn,
 		deselectAllBtn,
 		layout.NewSpacer(),
 	)
-	
+
 	repoButtons := container.New(layout.NewVBoxLayout(),
 		loadSection,
 		selectionButtons,
@@ -633,24 +595,24 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 	repoHeaderLabel := widget.NewLabel("Repository Selection")
 	repoHeaderLabel.TextStyle = fyne.TextStyle{Bold: true}
 	repoSubLabel := widget.NewLabel("Load and select target repositories")
-	
+
 	repoHeader := container.New(layout.NewVBoxLayout(),
 		repoHeaderLabel,
 		repoSubLabel,
 		widget.NewSeparator(),
 	)
-	
+
 	// Group fixed-height elements for the top section
 	topSection := container.New(layout.NewVBoxLayout(),
 		repoHeader,
 		repoButtons,
 		widget.NewSeparator(),
 	)
-	
+
 	// Use BorderLayout so scroll area expands to fill available space
 	repoContainer := container.New(layout.NewBorderLayout(topSection, nil, nil, nil),
-		topSection,  // Top border (fixed height)
-		repoScroll,  // Center (expands to fill)
+		topSection, // Top border (fixed height)
+		repoScroll, // Center (expands to fill)
 	)
 
 	buttonsContainer := container.NewPadded(
@@ -754,21 +716,58 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 
 func (f *FyneApp) handleValidateConfig() {
 	f.setStatus("Validating configuration...")
-	f.operationStatus.SetOperation(OperationAPIValidation, "Testing GitHub API connection")
-	f.showLoading("Validating configuration...")
 
+	// Determine which provider is selected
+	provider := "github"
+	if f.providerSelect.Selected == "Use Bitbucket" {
+		provider = "bitbucket"
+	}
+
+	// Create config data with only the selected provider's configuration
 	configData := ConfigData{
-		Provider:        f.providerSelect.Selected,
-		GitHubURL:       f.githubURLEntry.Text,
-		Token:           f.githubTokenEntry.Text,
-		Organization:    f.githubOrgEntry.Text,
-		Team:            f.githubTeamEntry.Text,
+		Provider:        provider,
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
 		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
 		PRTitleTemplate: f.prTitleEntry.Text,
 		PRBodyTemplate:  f.prBodyEntry.Text,
 		BranchPrefix:    f.branchPrefixEntry.Text,
 	}
+
+	// Only include the configuration for the provider being validated
+	if provider == "github" {
+		f.operationStatus.SetOperation(OperationAPIValidation, "Testing GitHub API connection")
+
+		// Check if required GitHub fields are filled (Organization and Team are optional)
+		if f.githubURLEntry.Text == "" || f.githubTokenEntry.Text == "" {
+			f.hideLoading()
+			f.setStatusError("Please fill in GitHub URL and Personal Access Token")
+			f.operationStatus.SetOperation(OperationIdle, "")
+			return
+		}
+
+		configData.GitHubURL = f.githubURLEntry.Text
+		configData.Token = f.githubTokenEntry.Text
+		configData.Organization = f.githubOrgEntry.Text
+		configData.Team = f.githubTeamEntry.Text
+	} else {
+		f.operationStatus.SetOperation(OperationAPIValidation, "Testing Bitbucket API connection")
+
+		// Check if Bitbucket fields are filled
+		if f.bitbucketURLEntry.Text == "" || f.bitbucketUsernameEntry.Text == "" ||
+			f.bitbucketPasswordEntry.Text == "" || f.bitbucketProjectEntry.Text == "" {
+			f.hideLoading()
+			f.setStatusError("Please fill in all Bitbucket configuration fields")
+			f.operationStatus.SetOperation(OperationIdle, "")
+			return
+		}
+
+		configData.BitbucketURL = f.bitbucketURLEntry.Text
+		configData.Username = f.bitbucketUsernameEntry.Text
+		configData.Password = f.bitbucketPasswordEntry.Text
+		configData.Project = f.bitbucketProjectEntry.Text
+	}
+
+	f.showLoading("Validating configuration...")
 
 	go func() {
 		err := f.service.UpdateConfig(configData)
@@ -789,7 +788,7 @@ func (f *FyneApp) handleValidateConfig() {
 
 		f.setStatusSuccess("Configuration validated successfully!")
 		f.operationStatus.SetOperation(OperationIdle, "")
-		
+
 		// Increment API call counter and refresh rate limit after GitHub API call
 		f.operationStatus.IncrementAPICall()
 		f.refreshRateLimit()
@@ -800,8 +799,26 @@ func (f *FyneApp) handleSaveConfig() {
 	f.setStatus("Saving configuration...")
 	f.showLoading("Saving configuration...")
 
+	// Determine which provider is currently selected as active
+	provider := "github"
+	if f.providerSelect.Selected == "Use Bitbucket" {
+		provider = "bitbucket"
+	}
+
+	// Save BOTH GitHub and Bitbucket configurations
 	configData := ConfigData{
-		Provider:        f.providerSelect.Selected,
+		Provider: provider, // This just indicates which provider is active
+		// GitHub configuration - always save
+		GitHubURL:    f.githubURLEntry.Text,
+		Token:        f.githubTokenEntry.Text,
+		Organization: f.githubOrgEntry.Text,
+		Team:         f.githubTeamEntry.Text,
+		// Bitbucket configuration - always save
+		BitbucketURL: f.bitbucketURLEntry.Text,
+		Username:     f.bitbucketUsernameEntry.Text,
+		Password:     f.bitbucketPasswordEntry.Text,
+		Project:      f.bitbucketProjectEntry.Text,
+		// Common configuration
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
 		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
 		PRTitleTemplate: f.prTitleEntry.Text,
@@ -809,47 +826,15 @@ func (f *FyneApp) handleSaveConfig() {
 		BranchPrefix:    f.branchPrefixEntry.Text,
 	}
 
-	f.logger.Info("GUI collecting config data", "provider", f.providerSelect.Selected)
-
-	// Collect provider-specific fields from dedicated widget instances
-	if f.providerSelect.Selected == "github" {
-		configData.GitHubURL = f.githubURLEntry.Text
-		configData.Token = f.githubTokenEntry.Text
-		configData.Organization = f.githubOrgEntry.Text
-		configData.Team = f.githubTeamEntry.Text
-		
-		f.logger.Debug("Collected GitHub fields from dedicated widgets", 
-			"base_url", configData.GitHubURL,
-			"org", configData.Organization,
-			"team", configData.Team,
-			"token_length", len(configData.Token))
-		
-		// Clear Bitbucket fields
-		configData.BitbucketURL = ""
-		configData.Username = ""
-		configData.Password = ""
-		configData.Project = ""
-	} else if f.providerSelect.Selected == "bitbucket" {
-		configData.BitbucketURL = f.bitbucketURLEntry.Text
-		configData.Username = f.bitbucketUsernameEntry.Text
-		configData.Password = f.bitbucketPasswordEntry.Text
-		configData.Project = f.bitbucketProjectEntry.Text
-		
-		f.logger.Info("Collected Bitbucket fields from dedicated widgets", 
-			"base_url", configData.BitbucketURL,
-			"username", configData.Username,
-			"project", configData.Project,
-			"password_length", len(configData.Password))
-		
-		// Clear GitHub fields
-		configData.GitHubURL = ""
-		configData.Token = ""
-		configData.Organization = ""
-		configData.Team = ""
-	}
+	f.logger.Info("Saving both provider configurations",
+		"active_provider", provider,
+		"github_url", configData.GitHubURL,
+		"github_org", configData.Organization,
+		"bitbucket_url", configData.BitbucketURL,
+		"bitbucket_project", configData.Project)
 
 	go func() {
-		err := f.service.UpdateConfig(configData)
+		err := f.service.SaveConfig(configData)
 		f.hideLoading()
 
 		if err != nil {
@@ -857,28 +842,38 @@ func (f *FyneApp) handleSaveConfig() {
 			return
 		}
 
-		f.setStatusSuccess("Configuration saved successfully!")
+		f.setStatusSuccess("Configuration saved successfully (both providers)!")
 	}()
 }
 
 func (f *FyneApp) handleSaveMigrationConfig() {
 	f.setStatus("Saving migration configuration...")
 	f.showLoading("Saving migration configuration...")
-	
+
+	// Determine which provider is selected
+	provider := "github"
+	if f.providerSelect.Selected == "Use Bitbucket" {
+		provider = "bitbucket"
+	}
+
 	// Collect current base configuration data from dedicated widget instances
 	configData := ConfigData{
-		Provider:        f.providerSelect.Selected,
+		Provider:        provider,
 		GitHubURL:       f.githubURLEntry.Text,
 		Token:           f.githubTokenEntry.Text,
 		Organization:    f.githubOrgEntry.Text,
 		Team:            f.githubTeamEntry.Text,
+		BitbucketURL:    f.bitbucketURLEntry.Text,
+		Username:        f.bitbucketUsernameEntry.Text,
+		Password:        f.bitbucketPasswordEntry.Text,
+		Project:         f.bitbucketProjectEntry.Text,
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
 		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
 		PRTitleTemplate: f.prTitleEntry.Text,
 		PRBodyTemplate:  f.prBodyEntry.Text,
 		BranchPrefix:    f.branchPrefixEntry.Text,
 	}
-	
+
 	// Add migration data
 	migrationConfig := f.collectMigrationConfig()
 	configData.MigrationSourceURL = migrationConfig.SourceBitbucketURL
@@ -886,15 +881,15 @@ func (f *FyneApp) handleSaveMigrationConfig() {
 	configData.MigrationTargetRepo = migrationConfig.TargetRepositoryName
 	configData.MigrationWebhookURL = migrationConfig.WebhookURL
 	configData.MigrationTeams = migrationConfig.Teams
-	
+
 	// Debug: Log what we're about to save
-	f.logger.Info("Saving migration config", 
+	f.logger.Info("Saving migration config",
 		"source_url", configData.MigrationSourceURL,
 		"target_org", configData.MigrationTargetOrg,
 		"target_repo", configData.MigrationTargetRepo,
 		"webhook_url", configData.MigrationWebhookURL,
 		"teams", configData.MigrationTeams)
-	
+
 	go func() {
 		err := f.service.SaveConfig(configData)
 		f.hideLoading()
@@ -924,7 +919,7 @@ func (f *FyneApp) handleAddTeam() {
 		permissionSelect,
 		removeBtn,
 	)
-	
+
 	// Use BorderLayout to give the team entry more space
 	teamContainer := container.New(
 		layout.NewBorderLayout(nil, nil, nil, rightControls),
@@ -959,7 +954,7 @@ func (f *FyneApp) addTeamFromConfig(teamName, permission string) {
 		permissionSelect,
 		removeBtn,
 	)
-	
+
 	// Use BorderLayout to give the team entry more space
 	teamContainer := container.New(
 		layout.NewBorderLayout(nil, nil, nil, rightControls),
@@ -1008,7 +1003,7 @@ func (f *FyneApp) handleMigrationDryRun() {
 			f.displayMigrationSteps(result.Steps)
 		})
 		f.setStatus("Dry run completed successfully!")
-		
+
 		// Refresh rate limit after GitHub API calls during migration dry run
 		f.refreshRateLimit()
 	}()
@@ -1035,7 +1030,7 @@ func (f *FyneApp) handleStartMigration() {
 		} else {
 			f.setStatus(fmt.Sprintf("Migration failed: %s", result.Message))
 		}
-		
+
 		// Refresh rate limit after GitHub API calls during migration
 		f.refreshRateLimit()
 	}()
@@ -1050,7 +1045,7 @@ func (f *FyneApp) collectMigrationConfig() MigrationConfig {
 			// New structure: teamContainer has rightControls and teamNameEntry
 			var teamEntry *widget.Entry
 			var permissionSelect *widget.Select
-			
+
 			// Find the team entry (it's the standalone object, not in rightControls)
 			for _, containerObj := range teamContainer.Objects {
 				if entry, ok := containerObj.(*widget.Entry); ok {
@@ -1058,7 +1053,7 @@ func (f *FyneApp) collectMigrationConfig() MigrationConfig {
 					break
 				}
 			}
-			
+
 			// Find the permission select (it's inside rightControls container)
 			for _, containerObj := range teamContainer.Objects {
 				if rightControls, ok := containerObj.(*fyne.Container); ok {
@@ -1071,7 +1066,7 @@ func (f *FyneApp) collectMigrationConfig() MigrationConfig {
 					}
 				}
 			}
-			
+
 			// If we found both widgets, add the team
 			if teamEntry != nil && permissionSelect != nil {
 				if teamEntry.Text != "" && permissionSelect.Selected != "" {
@@ -1255,8 +1250,8 @@ func (f *FyneApp) handleLoadRepositories() {
 		// Update UI with repository data
 		fyne.Do(func() {
 			f.repoSelectionContainer.RemoveAll()
-			f.repositories = repos // Store complete repository information
-			f.filteredRepositories = repos // Initially all repositories are visible
+			f.repositories = repos                                 // Store complete repository information
+			f.filteredRepositories = repos                         // Initially all repositories are visible
 			f.repoWidgets = make([]*fyne.Container, 0, len(repos)) // Clear existing widgets
 
 			for _, repo := range repos {
@@ -1276,14 +1271,14 @@ func (f *FyneApp) handleLoadRepositories() {
 				f.repoSelectionContainer.Add(repoContainer)
 				f.repoWidgets = append(f.repoWidgets, repoContainer) // Store widget reference
 			}
-			
+
 			// Clear any existing filter
 			f.repoFilterEntry.SetText("")
 		})
 
 		f.hideLoading()
 		f.setStatusSuccess(fmt.Sprintf("Loaded %d repositories", len(repos)))
-		
+
 		// Refresh rate limit after GitHub API call
 		f.refreshRateLimit()
 	}()
@@ -1294,26 +1289,26 @@ func (f *FyneApp) handleRepositoryFilter(filterText string) {
 	if len(f.repositories) == 0 {
 		return // No repositories loaded yet
 	}
-	
+
 	// Convert filter text to lowercase for case-insensitive search
 	filterLower := strings.ToLower(strings.TrimSpace(filterText))
-	
+
 	// Filter repositories
 	var filteredRepos []Repository
 	var visibleIndices []int
-	
+
 	for i, repo := range f.repositories {
 		if filterLower == "" || strings.Contains(strings.ToLower(repo.Name), filterLower) {
 			filteredRepos = append(filteredRepos, repo)
 			visibleIndices = append(visibleIndices, i)
 		}
 	}
-	
+
 	f.filteredRepositories = filteredRepos
-	
+
 	// Update UI visibility
 	f.updateRepositoryVisibility(visibleIndices)
-	
+
 	// Update status with filter results
 	if filterLower == "" {
 		f.setStatus(fmt.Sprintf("Showing all %d repositories", len(f.repositories)))
@@ -1327,23 +1322,23 @@ func (f *FyneApp) updateRepositoryVisibility(visibleIndices []int) {
 	if len(f.repoWidgets) == 0 {
 		return
 	}
-	
+
 	// Create a set of visible indices for O(1) lookup
 	visibleSet := make(map[int]bool)
 	for _, idx := range visibleIndices {
 		visibleSet[idx] = true
 	}
-	
+
 	// Remove all widgets from container
 	f.repoSelectionContainer.RemoveAll()
-	
+
 	// Add only visible widgets back
 	for i, widget := range f.repoWidgets {
 		if visibleSet[i] {
 			f.repoSelectionContainer.Add(widget)
 		}
 	}
-	
+
 	// Add "no results" message if no repositories match
 	if len(visibleIndices) == 0 && len(f.repositories) > 0 {
 		noResultsLabel := widget.NewLabel("No repositories match the current filter")
@@ -1351,7 +1346,7 @@ func (f *FyneApp) updateRepositoryVisibility(visibleIndices []int) {
 		noResultsLabel.TextStyle = fyne.TextStyle{Italic: true}
 		f.repoSelectionContainer.Add(container.NewCenter(noResultsLabel))
 	}
-	
+
 	// Refresh the container to update the UI
 	f.repoSelectionContainer.Refresh()
 }
@@ -1444,10 +1439,10 @@ func (f *FyneApp) handleReplacementDryRun() {
 		} else {
 			f.setStatus("Dry run completed! No changes found")
 		}
-		
+
 		// Reset operation status to idle
 		f.operationStatus.SetOperation(OperationIdle, "")
-		
+
 		// Refresh rate limit after GitHub API calls during dry run
 		f.refreshRateLimit()
 	}()
@@ -1555,7 +1550,7 @@ func (f *FyneApp) handleProcessReplacements() {
 		} else {
 			f.setStatusError(fmt.Sprintf("Processing failed: %s", result.Message))
 		}
-		
+
 		// Refresh rate limit after GitHub API calls during processing
 		f.refreshRateLimit()
 	}()
@@ -1670,7 +1665,7 @@ func (f *FyneApp) handleSelectAllRepos() {
 			}
 		}
 	}
-	
+
 	// Update status to show how many were selected
 	visibleCount := len(f.repoSelectionContainer.Objects)
 	if visibleCount > 0 {
@@ -1679,7 +1674,7 @@ func (f *FyneApp) handleSelectAllRepos() {
 }
 
 func (f *FyneApp) handleDeselectAllRepos() {
-	// Deselect all currently visible repositories (filtered)  
+	// Deselect all currently visible repositories (filtered)
 	for _, obj := range f.repoSelectionContainer.Objects {
 		if container, ok := obj.(*fyne.Container); ok {
 			if toggle, ok := container.Objects[0].(*ToggleSwitch); ok {
@@ -1687,7 +1682,7 @@ func (f *FyneApp) handleDeselectAllRepos() {
 			}
 		}
 	}
-	
+
 	// Update status to show how many were deselected
 	visibleCount := len(f.repoSelectionContainer.Objects)
 	if visibleCount > 0 {
@@ -1948,7 +1943,7 @@ func (f *FyneApp) aggressiveFilterDiff(diffContent string) string {
 	// The generateDiffFromFileChange already creates a proper, concise diff
 	lines := strings.Split(diffContent, "\n")
 	const maxLines = 100 // Allow more lines to show meaningful diffs
-	
+
 	// If the diff is too long, truncate but preserve structure
 	if len(lines) > maxLines {
 		var result []string
@@ -1957,7 +1952,7 @@ func (f *FyneApp) aggressiveFilterDiff(diffContent string) string {
 		result = append(result, fmt.Sprintf("... [Truncated - showing first %d lines of %d total] ...", maxLines, len(lines)))
 		return strings.Join(result, "\n")
 	}
-	
+
 	// Return original diff content to preserve proper structure
 	return diffContent
 }
@@ -2212,7 +2207,7 @@ func (f *FyneApp) applyChanges(rules []ReplacementRule, repos []Repository, opti
 		} else {
 			f.setStatusError(fmt.Sprintf("Processing failed: %s", result.Message))
 		}
-		
+
 		// Refresh rate limit after GitHub API calls during processing
 		f.refreshRateLimit()
 	}()
@@ -2287,44 +2282,43 @@ func (f *FyneApp) loadConfigurationFromFile() {
 		return
 	}
 
-	// Set provider and update fields (this will trigger the provider change callback)
-	if configData.Provider != "" {
-		f.providerSelect.SetSelected(configData.Provider)
-		// Manually trigger the update since SetSelected doesn't always trigger callback
-		f.updateProviderFields(configData.Provider)
+	// Save the loaded config for later use when recreating widgets
+	f.lastLoadedConfig = configData
+
+	// Set provider selection based on loaded configuration
+	if configData.Provider == "bitbucket" {
+		f.providerSelect.SetSelected("Use Bitbucket")
 	} else {
-		// Default to GitHub if no provider is set
-		f.providerSelect.SetSelected("github")
-		f.updateProviderFields("github")
+		// Default to GitHub if no provider is set or it's github
+		f.providerSelect.SetSelected("Use GitHub")
 	}
 
-	// Prefill provider-specific fields using dedicated widget instances
-	if configData.Provider == "github" {
-		if configData.GitHubURL != "" {
-			f.githubURLEntry.SetText(configData.GitHubURL)
-		}
-		if configData.Token != "" {
-			f.githubTokenEntry.SetText(configData.Token)
-		}
-		if configData.Organization != "" {
-			f.githubOrgEntry.SetText(configData.Organization)
-		}
-		if configData.Team != "" {
-			f.githubTeamEntry.SetText(configData.Team)
-		}
-	} else if configData.Provider == "bitbucket" {
-		if configData.BitbucketURL != "" {
-			f.bitbucketURLEntry.SetText(configData.BitbucketURL)
-		}
-		if configData.Username != "" {
-			f.bitbucketUsernameEntry.SetText(configData.Username)
-		}
-		if configData.Password != "" {
-			f.bitbucketPasswordEntry.SetText(configData.Password)
-		}
-		if configData.Project != "" {
-			f.bitbucketProjectEntry.SetText(configData.Project)
-		}
+	// Populate GitHub fields
+	if configData.GitHubURL != "" {
+		f.githubURLEntry.SetText(configData.GitHubURL)
+	}
+	if configData.Token != "" {
+		f.githubTokenEntry.SetText(configData.Token)
+	}
+	if configData.Organization != "" {
+		f.githubOrgEntry.SetText(configData.Organization)
+	}
+	if configData.Team != "" {
+		f.githubTeamEntry.SetText(configData.Team)
+	}
+
+	// Populate Bitbucket fields
+	if configData.BitbucketURL != "" {
+		f.bitbucketURLEntry.SetText(configData.BitbucketURL)
+	}
+	if configData.Username != "" {
+		f.bitbucketUsernameEntry.SetText(configData.Username)
+	}
+	if configData.Password != "" {
+		f.bitbucketPasswordEntry.SetText(configData.Password)
+	}
+	if configData.Project != "" {
+		f.bitbucketProjectEntry.SetText(configData.Project)
 	}
 
 	// Prefill pattern fields
@@ -2351,7 +2345,7 @@ func (f *FyneApp) loadConfigurationFromFile() {
 	f.targetOrgEntry.SetText(configData.MigrationTargetOrg)
 	f.targetRepoEntry.SetText(configData.MigrationTargetRepo)
 	f.webhookURLEntry.SetText(configData.MigrationWebhookURL)
-	
+
 	// Prefill migration teams (always clear and reload to sync with config)
 	f.teamsContainer.RemoveAll()
 	if len(configData.MigrationTeams) > 0 {
@@ -2400,13 +2394,13 @@ func (f *FyneApp) refreshRateLimit() {
 		f.rateLimitStatus.ShowError(fmt.Errorf("service not initialized"))
 		return
 	}
-	
+
 	// Temporarily show that we're checking rate limits
 	currentOp := f.operationStatus.StatusLabel.Text
 	if currentOp == "Idle" {
 		f.operationStatus.SetOperation(OperationAPIRateLimit, "")
 	}
-	
+
 	rateLimitInfo, err := f.service.GetRateLimitInfo()
 	if err != nil {
 		f.rateLimitStatus.ShowError(err)
@@ -2415,15 +2409,15 @@ func (f *FyneApp) refreshRateLimit() {
 		}
 		return
 	}
-	
+
 	// Increment API call counter for rate limit check
 	f.operationStatus.IncrementAPICall()
-	
+
 	// Reset operation status if it was idle before
 	if currentOp == "Idle" {
 		f.operationStatus.SetOperation(OperationIdle, "")
 	}
-	
+
 	f.rateLimitStatus.UpdateRateLimit(
 		rateLimitInfo.Core.Remaining,
 		rateLimitInfo.Core.Limit,
@@ -2442,11 +2436,11 @@ func (f *FyneApp) startRateLimitRefreshTimer() {
 		fyne.Do(func() {
 			f.refreshRateLimit()
 		})
-		
+
 		// Set up periodic refresh every 30 seconds
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		
+
 		for range ticker.C {
 			fyne.Do(func() {
 				f.refreshRateLimit()

@@ -13,11 +13,11 @@ import (
 
 // MigrationService handles repository migration from Bitbucket to GitHub
 type MigrationService struct {
-	githubClient    *github.Client
-	bitbucketClient *bitbucket.Client
-	gitOps          *git.MemoryOperations
-	config          *MigrationConfig
-	githubToken     string
+	githubClient     *github.Client
+	bitbucketClient  *bitbucket.Client
+	gitOps           *git.MemoryOperations
+	config           *MigrationConfig
+	githubToken      string
 	progressCallback func(step MigrationStep)
 }
 
@@ -25,9 +25,9 @@ type MigrationService struct {
 func NewMigrationService(githubClient *github.Client, gitOps *git.MemoryOperations, config *MigrationConfig, githubToken string, progressCallback func(step MigrationStep)) *MigrationService {
 	return &MigrationService{
 		githubClient:     githubClient,
-		gitOps:          gitOps,
-		config:          config,
-		githubToken:     githubToken,
+		gitOps:           gitOps,
+		config:           config,
+		githubToken:      githubToken,
 		progressCallback: progressCallback,
 	}
 }
@@ -157,7 +157,10 @@ func (ms *MigrationService) validateBitbucketSource(ctx context.Context) (*bitbu
 	}
 
 	// Extract project key and repo slug from URL path
-	// Expected format: /projects/PROJECT/repos/REPO or /scm/PROJECT/REPO.git
+	// Expected formats:
+	// 1. /projects/PROJECT/repos/REPO (Bitbucket Server REST API)
+	// 2. /scm/PROJECT/REPO.git (Bitbucket Server SCM)
+	// 3. /PROJECT/REPO.git (Direct SSH format)
 	path := strings.TrimPrefix(sourceURL.Path, "/")
 	parts := strings.Split(path, "/")
 
@@ -170,8 +173,16 @@ func (ms *MigrationService) validateBitbucketSource(ctx context.Context) (*bitbu
 		// Format: /scm/PROJECT/REPO.git
 		projectKey = parts[1]
 		repoSlug = strings.TrimSuffix(parts[2], ".git")
+	} else if len(parts) >= 2 {
+		// Format: /PROJECT/REPO.git (direct SSH format)
+		projectKey = parts[0]
+		repoSlug = strings.TrimSuffix(parts[1], ".git")
+		// If repoSlug is still empty after trimming, use the full part
+		if repoSlug == "" {
+			repoSlug = parts[1]
+		}
 	} else {
-		return nil, fmt.Errorf("unable to parse project and repository from URL: %s", ms.config.SourceBitbucketURL)
+		return nil, fmt.Errorf("unable to parse project and repository from URL: %s (supported formats: /projects/PROJECT/repos/REPO, /scm/PROJECT/REPO.git, /PROJECT/REPO.git)", ms.config.SourceBitbucketURL)
 	}
 
 	// Initialize Bitbucket client if not already done
@@ -228,7 +239,7 @@ func (ms *MigrationService) cloneFromBitbucket(ctx context.Context, bitbucketRep
 func (ms *MigrationService) pushToGitHub(ctx context.Context, memoryRepo *git.MemoryRepository, githubRepo *github.Repository) error {
 	// Get GitHub token from git operations (we need access to this)
 	// For now, we'll assume the token is available through the service configuration
-	
+
 	// Push all branches to the GitHub repository
 	err := memoryRepo.PushAllBranchesToRemote(ctx, githubRepo.CloneURL, ms.getGitHubToken())
 	if err != nil {

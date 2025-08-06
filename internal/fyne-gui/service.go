@@ -32,7 +32,7 @@ type ReplacementRule struct {
 	Original      string `json:"original"`
 	Replacement   string `json:"replacement"`
 	Regex         bool   `json:"regex"`
-	CaseSensitive bool   `json:"case_sensitive"`  
+	CaseSensitive bool   `json:"case_sensitive"`
 	WholeWord     bool   `json:"whole_word"`
 }
 
@@ -48,10 +48,10 @@ type ProcessingOptions struct {
 
 // ProcessingResult contains the results of a processing operation
 type ProcessingResult struct {
-	Success           bool                        `json:"success"`
-	Message           string                      `json:"message"`
-	RepositoryResults []RepositoryResult          `json:"repository_results"`
-	Diffs            map[string]map[string]string `json:"diffs,omitempty"`
+	Success           bool                         `json:"success"`
+	Message           string                       `json:"message"`
+	RepositoryResults []RepositoryResult           `json:"repository_results"`
+	Diffs             map[string]map[string]string `json:"diffs,omitempty"`
 }
 
 // RepositoryResult contains the result for a single repository
@@ -66,33 +66,33 @@ type RepositoryResult struct {
 
 // ConfigData holds configuration data for the GUI
 type ConfigData struct {
-	Provider        string   `json:"provider"`
-	
+	Provider string `json:"provider"`
+
 	// GitHub-specific fields
-	GitHubURL       string   `json:"github_url"`
-	Token           string   `json:"token"`
-	Organization    string   `json:"organization"`
-	Team            string   `json:"team"`
-	
+	GitHubURL    string `json:"github_url"`
+	Token        string `json:"token"`
+	Organization string `json:"organization"`
+	Team         string `json:"team"`
+
 	// Bitbucket-specific fields
-	BitbucketURL    string   `json:"bitbucket_url"`
-	Username        string   `json:"username"`
-	Password        string   `json:"password"`
-	Project         string   `json:"project"`
-	
+	BitbucketURL string `json:"bitbucket_url"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	Project      string `json:"project"`
+
 	// Common fields
 	IncludePatterns []string `json:"include_patterns"`
 	ExcludePatterns []string `json:"exclude_patterns"`
 	PRTitleTemplate string   `json:"pr_title_template"`
 	PRBodyTemplate  string   `json:"pr_body_template"`
 	BranchPrefix    string   `json:"branch_prefix"`
-	
+
 	// Migration settings
-	MigrationSourceURL   string            `json:"migration_source_url,omitempty"`
-	MigrationTargetOrg   string            `json:"migration_target_org,omitempty"`
-	MigrationTargetRepo  string            `json:"migration_target_repo,omitempty"`
-	MigrationWebhookURL  string            `json:"migration_webhook_url,omitempty"`
-	MigrationTeams       map[string]string `json:"migration_teams,omitempty"`
+	MigrationSourceURL  string            `json:"migration_source_url,omitempty"`
+	MigrationTargetOrg  string            `json:"migration_target_org,omitempty"`
+	MigrationTargetRepo string            `json:"migration_target_repo,omitempty"`
+	MigrationWebhookURL string            `json:"migration_webhook_url,omitempty"`
+	MigrationTeams      map[string]string `json:"migration_teams,omitempty"`
 }
 
 // MigrationConfig holds configuration for repository migration
@@ -144,7 +144,7 @@ func NewService(cfg *config.Config, logger *utils.Logger) *Service {
 // SaveConfig saves the current configuration to disk with automatic encryption
 func (s *Service) SaveConfig(configData ConfigData) error {
 	s.logger.Debug("SaveConfig called", "provider", configData.Provider)
-	
+
 	// Create secure config manager
 	scm, err := config.NewSecureConfigManager()
 	if err != nil {
@@ -169,49 +169,67 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 		Logging: s.config.Logging,
 	}
 
-	// Set provider-specific fields based on selected provider
-	if configData.Provider == "github" {
-		s.logger.Debug("Saving GitHub configuration", 
-			"base_url", configData.GitHubURL,
-			"org", configData.Organization,
-			"team", configData.Team,
-			"token_length", len(configData.Token))
-		
-		cfg.GitHub = config.GitHubConfig{
-			BaseURL:          configData.GitHubURL,
-			Token:            configData.Token,
-			Org:              configData.Organization,
-			Team:             configData.Team,
-			Timeout:          s.config.GitHub.Timeout,
-			MaxRetries:       s.config.GitHub.MaxRetries,
-			WaitForRateLimit: s.config.GitHub.WaitForRateLimit,
-		}
-		// Clear Bitbucket config when using GitHub
-		cfg.Bitbucket = config.BitbucketConfig{
-			Timeout:    s.config.Bitbucket.Timeout,
-			MaxRetries: s.config.Bitbucket.MaxRetries,
-		}
-	} else if configData.Provider == "bitbucket" {
-		s.logger.Debug("Saving Bitbucket configuration", 
-			"base_url", configData.BitbucketURL,
-			"username", configData.Username,
-			"project", configData.Project,
-			"password_length", len(configData.Password))
-		
-		cfg.Bitbucket = config.BitbucketConfig{
-			BaseURL:    configData.BitbucketURL,
-			Username:   configData.Username,
-			Password:   configData.Password,
-			Project:    configData.Project,
-			Timeout:    s.config.Bitbucket.Timeout,
-			MaxRetries: s.config.Bitbucket.MaxRetries,
-		}
-		// Clear GitHub config when using Bitbucket
-		cfg.GitHub = config.GitHubConfig{
-			Timeout:          s.config.GitHub.Timeout,
-			MaxRetries:       s.config.GitHub.MaxRetries,
-			WaitForRateLimit: s.config.GitHub.WaitForRateLimit,
-		}
+	// Save BOTH provider configurations - preserve existing values if new ones are empty
+	s.logger.Debug("Saving both provider configurations",
+		"active_provider", configData.Provider,
+		"github_url", configData.GitHubURL,
+		"github_org", configData.Organization,
+		"bitbucket_url", configData.BitbucketURL,
+		"bitbucket_project", configData.Project)
+
+	// Always set GitHub config - use new values if provided, otherwise keep existing
+	githubBaseURL := configData.GitHubURL
+	if githubBaseURL == "" {
+		githubBaseURL = s.config.GitHub.BaseURL
+	}
+	githubToken := configData.Token
+	if githubToken == "" {
+		githubToken = s.config.GitHub.Token
+	}
+	githubOrg := configData.Organization
+	if githubOrg == "" {
+		githubOrg = s.config.GitHub.Org
+	}
+	githubTeam := configData.Team
+	if githubTeam == "" {
+		githubTeam = s.config.GitHub.Team
+	}
+
+	cfg.GitHub = config.GitHubConfig{
+		BaseURL:          githubBaseURL,
+		Token:            githubToken,
+		Org:              githubOrg,
+		Team:             githubTeam,
+		Timeout:          s.config.GitHub.Timeout,
+		MaxRetries:       s.config.GitHub.MaxRetries,
+		WaitForRateLimit: s.config.GitHub.WaitForRateLimit,
+	}
+
+	// Always set Bitbucket config - use new values if provided, otherwise keep existing
+	bitbucketBaseURL := configData.BitbucketURL
+	if bitbucketBaseURL == "" {
+		bitbucketBaseURL = s.config.Bitbucket.BaseURL
+	}
+	bitbucketUsername := configData.Username
+	if bitbucketUsername == "" {
+		bitbucketUsername = s.config.Bitbucket.Username
+	}
+	bitbucketPassword := configData.Password
+	if bitbucketPassword == "" {
+		bitbucketPassword = s.config.Bitbucket.Password
+	}
+	bitbucketProject := configData.Project
+	if bitbucketProject == "" {
+		bitbucketProject = s.config.Bitbucket.Project
+	}
+
+	cfg.Bitbucket = config.BitbucketConfig{
+		BaseURL:    bitbucketBaseURL,
+		Username:   bitbucketUsername,
+		Password:   bitbucketPassword,
+		Project:    bitbucketProject,
+		Timeout:    s.config.Bitbucket.Timeout,
+		MaxRetries: s.config.Bitbucket.MaxRetries,
 	}
 
 	// Save migration settings to viper (these are not encrypted)
@@ -220,7 +238,7 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 	viper.Set("migration.target_repo", configData.MigrationTargetRepo)
 	viper.Set("migration.webhook_url", configData.MigrationWebhookURL)
 	viper.Set("migration.teams", configData.MigrationTeams)
-	
+
 	// Always try current directory first
 	currentDirConfig := "./config.yaml"
 	s.logger.Debug("Attempting to save config to current directory", "path", currentDirConfig)
@@ -230,23 +248,23 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 	} else {
 		s.logger.Debug("Failed to save to current directory", "error", err.Error())
 	}
-	
+
 	// Current directory failed, try home directory
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-	
+
 	configDir := filepath.Join(home, ".go-toolgit")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-	
+
 	configPath := filepath.Join(configDir, "config.yaml")
 	if err := scm.SaveSecureConfigToFile(cfg, configPath); err != nil {
 		return fmt.Errorf("failed to write encrypted config file: %w", err)
 	}
-	
+
 	s.logger.Info("Saved encrypted config to home directory", "path", configPath)
 	return nil
 }
@@ -255,7 +273,7 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 func (s *Service) InitializeServiceConfig(configData ConfigData) error {
 	// Update provider first
 	s.config.Provider = configData.Provider
-	
+
 	// Update provider-specific fields (allow empty values to enable clearing)
 	if configData.Provider == "github" {
 		s.config.GitHub.BaseURL = configData.GitHubURL
@@ -278,11 +296,11 @@ func (s *Service) InitializeServiceConfig(configData ConfigData) error {
 		s.config.GitHub.Org = ""
 		s.config.GitHub.Team = ""
 	}
-	
+
 	// Update processing patterns (allow empty to enable clearing)
 	s.config.Processing.IncludePatterns = configData.IncludePatterns
 	s.config.Processing.ExcludePatterns = configData.ExcludePatterns
-	
+
 	// Update pull request config (allow empty to enable clearing)
 	s.config.PullRequest.TitleTemplate = configData.PRTitleTemplate
 	s.config.PullRequest.BodyTemplate = configData.PRBodyTemplate
@@ -323,7 +341,7 @@ func (s *Service) UpdateConfig(configData ConfigData) error {
 	if err := s.SaveConfig(configData); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
-	
+
 	// Initialize service configuration
 	return s.InitializeServiceConfig(configData)
 }
@@ -335,7 +353,7 @@ func (s *Service) ValidateAccess() error {
 	}
 
 	ctx := context.Background()
-	
+
 	// Test GitHub API access - validate token access and org/team if specified
 	err := s.githubClient.ValidateAccess(ctx, s.config.GitHub.Org, s.config.GitHub.Team)
 	if err != nil {
@@ -517,7 +535,7 @@ func (s *Service) ProcessReplacements(rules []ReplacementRule, repos []Repositor
 		Success:           overallSuccess,
 		Message:           message,
 		RepositoryResults: repoResults,
-		Diffs:            diffs,
+		Diffs:             diffs,
 	}, nil
 }
 
@@ -609,7 +627,7 @@ func (s *Service) createBitbucketClient() (*bitbucket.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load secure configuration: %w", err)
 	}
-	
+
 	if cfg.Bitbucket.BaseURL == "" || cfg.Bitbucket.Username == "" || cfg.Bitbucket.Password == "" {
 		// Return nil client if Bitbucket is not configured - migration service will handle this
 		return nil, fmt.Errorf("Bitbucket configuration incomplete - base_url, username, and password/app_password required")
@@ -640,7 +658,7 @@ func (s *Service) createBitbucketClient() (*bitbucket.Client, error) {
 func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 	// Initialize viper if not already configured
 	initializeViper()
-	
+
 	// Use secure config loading to automatically decrypt sensitive fields
 	cfg, err := config.LoadSecure()
 	if err != nil {
@@ -652,7 +670,7 @@ func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 	if provider == "" {
 		provider = "github"
 	}
-	
+
 	configData := &ConfigData{
 		Provider:        provider,
 		IncludePatterns: cfg.Processing.IncludePatterns,
@@ -660,13 +678,13 @@ func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 		PRTitleTemplate: cfg.PullRequest.TitleTemplate,
 		PRBodyTemplate:  cfg.PullRequest.BodyTemplate,
 		BranchPrefix:    cfg.PullRequest.BranchPrefix,
-		
+
 		// Load migration settings from viper if they exist
-		MigrationSourceURL:   viper.GetString("migration.source_url"),
-		MigrationTargetOrg:   viper.GetString("migration.target_org"),
-		MigrationTargetRepo:  viper.GetString("migration.target_repo"),
-		MigrationWebhookURL:  viper.GetString("migration.webhook_url"),
-		MigrationTeams:       viper.GetStringMapString("migration.teams"),
+		MigrationSourceURL:  viper.GetString("migration.source_url"),
+		MigrationTargetOrg:  viper.GetString("migration.target_org"),
+		MigrationTargetRepo: viper.GetString("migration.target_repo"),
+		MigrationWebhookURL: viper.GetString("migration.webhook_url"),
+		MigrationTeams:      viper.GetStringMapString("migration.teams"),
 	}
 
 	// Load provider-specific fields based on the current provider
@@ -695,7 +713,7 @@ func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 	return configData, nil
 }
 
-// GetRateLimitInfo retrieves GitHub API rate limit information  
+// GetRateLimitInfo retrieves GitHub API rate limit information
 func (s *Service) GetRateLimitInfo() (*RateLimitInfo, error) {
 	if s.githubClient == nil {
 		return nil, fmt.Errorf("GitHub client not initialized")
@@ -716,10 +734,10 @@ func initializeViper() {
 	if viper.ConfigFileUsed() != "" {
 		return
 	}
-	
+
 	// Set defaults
 	setDefaults()
-	
+
 	// Configure search paths (current directory first to match save priority)
 	viper.AddConfigPath(".")
 	home, err := os.UserHomeDir()
@@ -728,11 +746,11 @@ func initializeViper() {
 	}
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
-	
+
 	// Set environment variable prefix
 	viper.SetEnvPrefix("GITHUB_REPLACE")
 	viper.AutomaticEnv()
-	
+
 	// Try to read the config file
 	viper.ReadInConfig()
 }
@@ -742,25 +760,25 @@ func (s *Service) generateDiffFromFileChange(fileChange *processor.FileChange) s
 	if fileChange == nil || len(fileChange.StringChanges) == 0 {
 		return ""
 	}
-	
+
 	var diff strings.Builder
-	
+
 	// Write file header
 	diff.WriteString(fmt.Sprintf("--- %s (original)\n", fileChange.FilePath))
 	diff.WriteString(fmt.Sprintf("+++ %s (modified)\n", fileChange.FilePath))
-	
+
 	// Generate diff for each change
 	for i, change := range fileChange.StringChanges {
 		// Add hunk header for each change
-		diff.WriteString(fmt.Sprintf("@@ -%d,1 +%d,1 @@ Change %d of %d\n", 
+		diff.WriteString(fmt.Sprintf("@@ -%d,1 +%d,1 @@ Change %d of %d\n",
 			change.LineNumber, change.LineNumber, i+1, len(fileChange.StringChanges)))
-		
+
 		// If we have context, show it first
 		if change.Context != "" {
 			// Show context line with the original string highlighted
 			contextWithOriginal := change.Context
 			diff.WriteString(fmt.Sprintf("- %s\n", contextWithOriginal))
-			
+
 			// Show context line with the replacement string
 			contextWithReplacement := strings.Replace(change.Context, change.Original, change.Replacement, -1)
 			diff.WriteString(fmt.Sprintf("+ %s\n", contextWithReplacement))
@@ -769,13 +787,12 @@ func (s *Service) generateDiffFromFileChange(fileChange *processor.FileChange) s
 			diff.WriteString(fmt.Sprintf("- %s\n", change.Original))
 			diff.WriteString(fmt.Sprintf("+ %s\n", change.Replacement))
 		}
-		
+
 		diff.WriteString("\n")
 	}
-	
+
 	return diff.String()
 }
-
 
 // setDefaults sets default configuration values
 func setDefaults() {
