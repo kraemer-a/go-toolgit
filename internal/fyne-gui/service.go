@@ -88,23 +88,25 @@ type ConfigData struct {
 	BranchPrefix    string   `json:"branch_prefix"`
 
 	// Migration settings
-	MigrationSourceURL  string            `json:"migration_source_url,omitempty"`
-	MigrationTargetOrg  string            `json:"migration_target_org,omitempty"`
-	MigrationTargetRepo string            `json:"migration_target_repo,omitempty"`
-	MigrationWebhookURL string            `json:"migration_webhook_url,omitempty"`
-	MigrationTeams      map[string]string `json:"migration_teams,omitempty"`
-	MigrationPrivate    bool              `json:"migration_private,omitempty"`
+	MigrationSourceURL       string            `json:"migration_source_url,omitempty"`
+	MigrationTargetOrg       string            `json:"migration_target_org,omitempty"`
+	MigrationTargetRepo      string            `json:"migration_target_repo,omitempty"`
+	MigrationWebhookURL      string            `json:"migration_webhook_url,omitempty"`
+	MigrationTeams           map[string]string `json:"migration_teams,omitempty"`
+	MigrationPrivate         bool              `json:"migration_private,omitempty"`
+	MigrationTransformMaster bool              `json:"migration_transform_master,omitempty"`
 }
 
 // MigrationConfig holds configuration for repository migration
 type MigrationConfig struct {
-	SourceBitbucketURL   string            `json:"source_bitbucket_url"`
-	TargetGitHubOrg      string            `json:"target_github_org"`
-	TargetRepositoryName string            `json:"target_repository_name"`
-	WebhookURL           string            `json:"webhook_url"`
-	Teams                map[string]string `json:"teams"`
-	Private              bool              `json:"private"`
-	DryRun               bool              `json:"dry_run"`
+	SourceBitbucketURL    string            `json:"source_bitbucket_url"`
+	TargetGitHubOrg       string            `json:"target_github_org"`
+	TargetRepositoryName  string            `json:"target_repository_name"`
+	WebhookURL            string            `json:"webhook_url"`
+	Teams                 map[string]string `json:"teams"`
+	Private               bool              `json:"private"`
+	DryRun                bool              `json:"dry_run"`
+	TransformMasterToMain bool              `json:"transform_master_to_main"`
 }
 
 // MigrationStep represents a step in the migration process
@@ -241,6 +243,7 @@ func (s *Service) SaveConfig(configData ConfigData) error {
 	viper.Set("migration.webhook_url", configData.MigrationWebhookURL)
 	viper.Set("migration.teams", configData.MigrationTeams)
 	viper.Set("migration.private", configData.MigrationPrivate)
+	viper.Set("migration.transform_master", configData.MigrationTransformMaster)
 
 	// Always try current directory first
 	currentDirConfig := "./config.yaml"
@@ -780,12 +783,13 @@ func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 		BranchPrefix:    cfg.PullRequest.BranchPrefix,
 
 		// Load migration settings from viper if they exist
-		MigrationSourceURL:  viper.GetString("migration.source_url"),
-		MigrationTargetOrg:  viper.GetString("migration.target_org"),
-		MigrationTargetRepo: viper.GetString("migration.target_repo"),
-		MigrationWebhookURL: viper.GetString("migration.webhook_url"),
-		MigrationTeams:      viper.GetStringMapString("migration.teams"),
-		MigrationPrivate:    viper.GetBool("migration.private"),
+		MigrationSourceURL:       viper.GetString("migration.source_url"),
+		MigrationTargetOrg:       viper.GetString("migration.target_org"),
+		MigrationTargetRepo:      viper.GetString("migration.target_repo"),
+		MigrationWebhookURL:      viper.GetString("migration.webhook_url"),
+		MigrationTeams:           viper.GetStringMapString("migration.teams"),
+		MigrationPrivate:         viper.GetBool("migration.private"),
+		MigrationTransformMaster: viper.GetBool("migration.transform_master"),
 
 		// Always load BOTH provider configurations regardless of active provider
 		// GitHub configuration
@@ -906,5 +910,6 @@ func setDefaults() {
 	viper.SetDefault("pull_request.delete_branch", true)
 	viper.SetDefault("logging.level", "info")
 	viper.SetDefault("logging.format", "text")
-	viper.SetDefault("migration.private", true) // Default to private for security
+	viper.SetDefault("migration.private", true)          // Default to private for security
+	viper.SetDefault("migration.transform_master", true) // Default to transforming master→main
 }

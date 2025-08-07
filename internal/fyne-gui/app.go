@@ -95,6 +95,7 @@ type FyneApp struct {
 	targetOrgEntry             *widget.Entry
 	targetRepoEntry            *widget.Entry
 	repositoryVisibilitySelect *widget.Select
+	transformMasterToMainCheck *widget.Check
 	webhookURLEntry            *widget.Entry
 	teamsContainer             *fyne.Container
 	progressContainer          *fyne.Container
@@ -665,6 +666,9 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 	f.repositoryVisibilitySelect = widget.NewSelect([]string{"Private", "Public"}, nil)
 	f.repositoryVisibilitySelect.SetSelected("Private") // Default to private for security
 
+	f.transformMasterToMainCheck = widget.NewCheck("Rename master branch to main", nil)
+	f.transformMasterToMainCheck.SetChecked(true) // Default to true (modern Git practice)
+
 	f.webhookURLEntry = widget.NewEntry()
 	f.webhookURLEntry.SetPlaceHolder("https://ci.company.com/webhook")
 
@@ -697,6 +701,7 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 			{Text: "Target GitHub Organization", Widget: f.targetOrgEntry, HintText: "GitHub organization for the new repository"},
 			{Text: "Target Repository Name", Widget: f.targetRepoEntry, HintText: "Name for the new GitHub repository"},
 			{Text: "Repository Visibility", Widget: f.repositoryVisibilitySelect, HintText: "Private repositories are only visible to you and specified teams"},
+			{Text: "Branch Transformation", Widget: f.transformMasterToMainCheck, HintText: "Automatically rename master branch to main (recommended)"},
 			{Text: "Webhook URL (optional)", Widget: f.webhookURLEntry, HintText: "URL to trigger after successful migration"},
 		},
 	}
@@ -907,6 +912,7 @@ func (f *FyneApp) handleSaveMigrationConfig() {
 	configData.MigrationWebhookURL = migrationConfig.WebhookURL
 	configData.MigrationTeams = migrationConfig.Teams
 	configData.MigrationPrivate = migrationConfig.Private
+	configData.MigrationTransformMaster = migrationConfig.TransformMasterToMain
 
 	// Debug: Log what we're about to save
 	f.logger.Info("Saving migration config",
@@ -1122,12 +1128,13 @@ func (f *FyneApp) collectMigrationConfig() MigrationConfig {
 	}
 
 	return MigrationConfig{
-		SourceBitbucketURL:   f.sourceURLEntry.Text,
-		TargetGitHubOrg:      f.targetOrgEntry.Text,
-		TargetRepositoryName: f.targetRepoEntry.Text,
-		WebhookURL:           f.webhookURLEntry.Text,
-		Teams:                teams,
-		Private:              f.repositoryVisibilitySelect.Selected == "Private",
+		SourceBitbucketURL:    f.sourceURLEntry.Text,
+		TargetGitHubOrg:       f.targetOrgEntry.Text,
+		TargetRepositoryName:  f.targetRepoEntry.Text,
+		WebhookURL:            f.webhookURLEntry.Text,
+		Teams:                 teams,
+		Private:               f.repositoryVisibilitySelect.Selected == "Private",
+		TransformMasterToMain: f.transformMasterToMainCheck.Checked,
 	}
 }
 
@@ -2491,6 +2498,10 @@ func (f *FyneApp) loadConfigurationFromFile() {
 	} else {
 		f.repositoryVisibilitySelect.SetSelected("Public")
 	}
+
+	// Set master→main transformation checkbox based on loaded configuration
+	// Default to true for new configurations or when explicitly enabled
+	f.transformMasterToMainCheck.SetChecked(configData.MigrationTransformMaster || (configData.MigrationSourceURL == "" && configData.MigrationTargetOrg == ""))
 
 	// Prefill migration teams (always clear and reload to sync with config)
 	f.teamsContainer.RemoveAll()

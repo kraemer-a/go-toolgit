@@ -372,6 +372,11 @@ func (mr *MemoryRepository) PushAllBranchesToRemote(ctx context.Context, remoteU
 
 // PushAllReferencesToRemote pushes all references (branches, tags, etc.) to a different remote repository (mirror push)
 func (mr *MemoryRepository) PushAllReferencesToRemote(ctx context.Context, remoteURL, token string) error {
+	return mr.PushAllReferencesToRemoteWithOptions(ctx, remoteURL, token, true)
+}
+
+// PushAllReferencesToRemoteWithOptions pushes all references with master→main transformation option
+func (mr *MemoryRepository) PushAllReferencesToRemoteWithOptions(ctx context.Context, remoteURL, token string, transformMasterToMain bool) error {
 	// Create authentication for the new remote
 	auth := &http.BasicAuth{
 		Username: "git", // Can be anything for GitHub PAT
@@ -397,19 +402,39 @@ func (mr *MemoryRepository) PushAllReferencesToRemote(ctx context.Context, remot
 	}
 
 	var refSpecs []config.RefSpec
+	var masterTransformed bool
+
 	err = refs.ForEach(func(ref *plumbing.Reference) error {
 		refName := ref.Name()
 
 		// Handle branches, tags, and notes
 		if refName.IsBranch() || refName.IsTag() || refName.IsNote() {
-			// Direct mapping for branches and tags
-			refSpec := config.RefSpec(refName + ":" + refName)
-			refSpecs = append(refSpecs, refSpec)
+			// Handle master→main transformation for branches
+			if refName.IsBranch() && transformMasterToMain && refName.String() == "refs/heads/master" {
+				// Transform master branch to main
+				targetRef := "refs/heads/main"
+				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(targetRef))
+				refSpecs = append(refSpecs, refSpec)
+				masterTransformed = true
+				log.Printf("[INFO] Transforming master branch to main during migration")
+			} else {
+				// Direct mapping for all other branches, tags, and notes
+				refSpec := config.RefSpec(refName + ":" + refName)
+				refSpecs = append(refSpecs, refSpec)
+			}
 		} else if refName.IsRemote() {
 			// Map remote refs to local branches (refs/remotes/origin/branch -> refs/heads/branch)
 			refStr := refName.String()
 			if strings.HasPrefix(refStr, "refs/remotes/origin/") {
 				localBranch := strings.Replace(refStr, "refs/remotes/origin/", "refs/heads/", 1)
+
+				// Handle master→main transformation for remote refs too
+				if transformMasterToMain && localBranch == "refs/heads/master" {
+					localBranch = "refs/heads/main"
+					masterTransformed = true
+					log.Printf("[INFO] Transforming remote master branch to main during migration")
+				}
+
 				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(localBranch))
 				refSpecs = append(refSpecs, refSpec)
 			}
@@ -424,7 +449,11 @@ func (mr *MemoryRepository) PushAllReferencesToRemote(ctx context.Context, remot
 		return fmt.Errorf("no references found to push")
 	}
 
-	log.Printf("[INFO] Pushing %d references to migration target", len(refSpecs))
+	if masterTransformed {
+		log.Printf("[INFO] Pushing %d references to migration target (master→main transformation applied)", len(refSpecs))
+	} else {
+		log.Printf("[INFO] Pushing %d references to migration target", len(refSpecs))
+	}
 
 	// Push all references to the new remote with force to handle any conflicts
 	err = mr.repo.PushContext(ctx, &git.PushOptions{
@@ -438,6 +467,156 @@ func (mr *MemoryRepository) PushAllReferencesToRemote(ctx context.Context, remot
 	}
 
 	return nil
+}
+
+// MigrationResult contains information about the push operation
+type MigrationPushResult struct {
+	Success           bool
+	MasterTransformed bool
+	ReferencesCount   int
+	Error             error
+}
+
+// PushAllReferencesToRemoteWithResult pushes all references and returns detailed result information
+func (mr *MemoryRepository) PushAllReferencesToRemoteWithResult(ctx context.Context, remoteURL, token string, transformMasterToMain bool) *MigrationPushResult {
+	result := &MigrationPushResult{
+		Success: false,
+	}
+
+	// Create authentication for the new remote
+	auth := &http.BasicAuth{
+		Username: "git", // Can be anything for GitHub PAT
+		Password: token,
+	}
+
+	// Add the new remote
+	_, err := mr.repo.CreateRemote(&config.RemoteConfig{
+		Name: "migration-target",
+		URLs: []string{remoteURL},
+	})
+	if err != nil {
+		// If remote already exists, that's fine
+		if err.Error() != "remote already exists" {
+			result.Error = fmt.Errorf("failed to create migration-target remote: %w", err)
+			return result
+		}
+	}
+
+	// Get all references
+	refs, err := mr.repo.References()
+	if err != nil {
+		result.Error = fmt.Errorf("failed to get references: %w", err)
+		return result
+	}
+
+	var refSpecs []config.RefSpec
+	var masterTransformed bool
+
+	err = refs.ForEach(func(ref *plumbing.Reference) error {
+		refName := ref.Name()
+
+		// Handle branches, tags, and notes
+		if refName.IsBranch() || refName.IsTag() || refName.IsNote() {
+			// Handle master→main transformation for branches
+			if refName.IsBranch() && transformMasterToMain && refName.String() == "refs/heads/master" {
+				// Transform master branch to main
+				targetRef := "refs/heads/main"
+				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(targetRef))
+				refSpecs = append(refSpecs, refSpec)
+				masterTransformed = true
+				log.Printf("[INFO] Transforming master branch to main during migration")
+			} else {
+				// Direct mapping for all other branches, tags, and notes
+				refSpec := config.RefSpec(refName + ":" + refName)
+				refSpecs = append(refSpecs, refSpec)
+			}
+		} else if refName.IsRemote() {
+			// Map remote refs to local branches (refs/remotes/origin/branch -> refs/heads/branch)
+			refStr := refName.String()
+			if strings.HasPrefix(refStr, "refs/remotes/origin/") {
+				localBranch := strings.Replace(refStr, "refs/remotes/origin/", "refs/heads/", 1)
+
+				// Handle master→main transformation for remote refs too
+				if transformMasterToMain && localBranch == "refs/heads/master" {
+					localBranch = "refs/heads/main"
+					masterTransformed = true
+					log.Printf("[INFO] Transforming remote master branch to main during migration")
+				}
+
+				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(localBranch))
+				refSpecs = append(refSpecs, refSpec)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		result.Error = fmt.Errorf("failed to iterate references: %w", err)
+		return result
+	}
+
+	if len(refSpecs) == 0 {
+		result.Error = fmt.Errorf("no references found to push")
+		return result
+	}
+
+	result.ReferencesCount = len(refSpecs)
+	result.MasterTransformed = masterTransformed
+
+	if masterTransformed {
+		log.Printf("[INFO] Pushing %d references to migration target (master→main transformation applied)", len(refSpecs))
+	} else {
+		log.Printf("[INFO] Pushing %d references to migration target", len(refSpecs))
+	}
+
+	// Push all references to the new remote with force to handle any conflicts
+	err = mr.repo.PushContext(ctx, &git.PushOptions{
+		RemoteName: "migration-target",
+		RefSpecs:   refSpecs,
+		Auth:       auth,
+		Force:      true, // Force push to ensure complete migration
+	})
+	if err != nil {
+		result.Error = fmt.Errorf("failed to push all references to migration target: %w", err)
+		return result
+	}
+
+	result.Success = true
+	return result
+}
+
+// DetectDefaultBranch detects the default branch of the repository
+func (mr *MemoryRepository) DetectDefaultBranch() (string, error) {
+	// Try to get the HEAD reference to determine default branch
+	head, err := mr.repo.Head()
+	if err != nil {
+		return "", fmt.Errorf("failed to get HEAD reference: %w", err)
+	}
+
+	if !head.Name().IsBranch() {
+		return "", fmt.Errorf("HEAD is not pointing to a branch")
+	}
+
+	// Extract branch name from reference (refs/heads/branch-name -> branch-name)
+	branchName := head.Name().Short()
+	return branchName, nil
+}
+
+// HasMasterBranch checks if the repository has a master branch
+func (mr *MemoryRepository) HasMasterBranch() bool {
+	refs, err := mr.repo.References()
+	if err != nil {
+		return false
+	}
+
+	hasMaster := false
+	refs.ForEach(func(ref *plumbing.Reference) error {
+		if ref.Name().String() == "refs/heads/master" {
+			hasMaster = true
+		}
+		return nil
+	})
+
+	return hasMaster
 }
 
 // HasChanges checks if there are any modified files

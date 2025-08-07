@@ -94,7 +94,14 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 	}
 
 	// Step 4: Push all references to target repository (skip in dry run)
-	ms.updateStep(&steps[3], "running", 0, "Pushing all references (branches, tags) to GitHub...")
+	var pushMessage string
+	if ms.config.TransformMasterToMain {
+		pushMessage = "Pushing all references to GitHub (master→main transformation enabled)..."
+	} else {
+		pushMessage = "Pushing all references to GitHub..."
+	}
+	ms.updateStep(&steps[3], "running", 0, pushMessage)
+
 	if !ms.config.DryRun && githubRepo != nil && memoryRepo != nil {
 		err = ms.pushToGitHub(ctx, memoryRepo, githubRepo)
 		if err != nil {
@@ -102,9 +109,21 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 			result.Message = fmt.Sprintf("Push to GitHub failed: %v", err)
 			return result, err
 		}
-		ms.updateStep(&steps[3], "completed", 100, "All references pushed to GitHub (branches, tags)")
+		var completedMessage string
+		if ms.config.TransformMasterToMain {
+			completedMessage = "All references pushed to GitHub (master→main transformation applied)"
+		} else {
+			completedMessage = "All references pushed to GitHub"
+		}
+		ms.updateStep(&steps[3], "completed", 100, completedMessage)
 	} else {
-		ms.updateStep(&steps[3], "completed", 100, "Would push all references to target repository")
+		var dryRunMessage string
+		if ms.config.TransformMasterToMain {
+			dryRunMessage = "Would push all references with master→main transformation"
+		} else {
+			dryRunMessage = "Would push all references to target repository"
+		}
+		ms.updateStep(&steps[3], "completed", 100, dryRunMessage)
 	}
 
 	// Step 5: Configure teams (skip in dry run)
@@ -275,9 +294,31 @@ func (ms *MigrationService) pushToGitHub(ctx context.Context, memoryRepo *git.Me
 	// For now, we'll assume the token is available through the service configuration
 
 	// Push all references (branches, tags, notes, etc.) to the GitHub repository (mirror push)
-	err := memoryRepo.PushAllReferencesToRemote(ctx, githubRepo.CloneURL, ms.getGitHubToken())
-	if err != nil {
-		return fmt.Errorf("failed to push all references to GitHub: %w", err)
+	// Use configuration option for master→main transformation
+	pushResult := memoryRepo.PushAllReferencesToRemoteWithResult(ctx, githubRepo.CloneURL, ms.getGitHubToken(), ms.config.TransformMasterToMain)
+	if pushResult.Error != nil {
+		return fmt.Errorf("failed to push all references to GitHub: %w", pushResult.Error)
+	}
+
+	// If master was transformed to main, update the default branch on GitHub
+	if pushResult.MasterTransformed {
+		err := ms.updateDefaultBranchToMain(ctx, githubRepo)
+		if err != nil {
+			// Log the error but don't fail the migration - the push was successful
+			ms.progressCallback(MigrationStep{
+				Description: "Updating default branch to main",
+				Status:      "completed",
+				Progress:    100,
+				Message:     fmt.Sprintf("Warning: failed to update default branch: %v", err),
+			})
+		} else {
+			ms.progressCallback(MigrationStep{
+				Description: "Updating default branch to main",
+				Status:      "completed",
+				Progress:    100,
+				Message:     "Default branch updated to main",
+			})
+		}
 	}
 
 	return nil
@@ -286,6 +327,28 @@ func (ms *MigrationService) pushToGitHub(ctx context.Context, memoryRepo *git.Me
 // getGitHubToken retrieves the GitHub token
 func (ms *MigrationService) getGitHubToken() string {
 	return ms.githubToken
+}
+
+// updateDefaultBranchToMain updates the GitHub repository's default branch to main
+func (ms *MigrationService) updateDefaultBranchToMain(ctx context.Context, githubRepo *github.Repository) error {
+	// Parse owner/repo from full name
+	parts := strings.Split(githubRepo.FullName, "/")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid repository full name: %s", githubRepo.FullName)
+	}
+	owner, repo := parts[0], parts[1]
+
+	// Update the repository's default branch to main
+	updateOpts := &github.UpdateRepositoryOptions{
+		DefaultBranch: "main",
+	}
+
+	_, err := ms.githubClient.UpdateRepository(ctx, owner, repo, updateOpts)
+	if err != nil {
+		return fmt.Errorf("failed to update default branch to main: %w", err)
+	}
+
+	return nil
 }
 
 // configureTeams adds teams to the GitHub repository
