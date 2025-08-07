@@ -707,6 +707,7 @@ func (s *Service) MigrateRepositoryWithCallback(config MigrationConfig, liveProg
 		{Description: "Pushing to target repository", Status: "pending", Progress: 0},
 		{Description: "Configuring teams", Status: "pending", Progress: 0},
 		{Description: "Setting up webhooks", Status: "pending", Progress: 0},
+		{Description: "Triggering pipeline", Status: "pending", Progress: 0},
 	}
 
 	// Perform the actual migration

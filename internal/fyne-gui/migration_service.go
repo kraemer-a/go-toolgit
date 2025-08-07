@@ -45,6 +45,7 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 		{Description: "Pushing to target repository", Status: "pending", Progress: 0},
 		{Description: "Configuring teams", Status: "pending", Progress: 0},
 		{Description: "Setting up webhooks", Status: "pending", Progress: 0},
+		{Description: "Triggering pipeline", Status: "pending", Progress: 0},
 	}
 
 	result := &MigrationResult{
@@ -136,6 +137,20 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 		ms.updateStep(&steps[5], "completed", 100, "Would configure webhook")
 	} else {
 		ms.updateStep(&steps[5], "completed", 100, "No webhook to configure")
+	}
+
+	// Step 7: Trigger pipeline by modifying README.md (skip in dry run)
+	ms.updateStep(&steps[6], "running", 0, "Triggering CI/CD pipeline...")
+	if !ms.config.DryRun && memoryRepo != nil && githubRepo != nil {
+		err = ms.triggerPipeline(ctx, memoryRepo, githubRepo)
+		if err != nil {
+			// Log warning but don't fail the entire migration
+			ms.updateStep(&steps[6], "completed", 100, fmt.Sprintf("Warning: pipeline trigger failed: %v", err))
+		} else {
+			ms.updateStep(&steps[6], "completed", 100, "Pipeline triggered successfully")
+		}
+	} else {
+		ms.updateStep(&steps[6], "completed", 100, "Would trigger pipeline")
 	}
 
 	// Success!
@@ -390,4 +405,69 @@ func (ms *MigrationService) convertAPIToWebURL(apiURL string) string {
 	}
 
 	return fmt.Sprintf("%s://%s", scheme, host)
+}
+
+// triggerPipeline modifies README.md and commits to trigger webhooks and CI/CD pipelines
+func (ms *MigrationService) triggerPipeline(ctx context.Context, memoryRepo *git.MemoryRepository, githubRepo *github.Repository) error {
+	// List all files in the repository to find README.md
+	files, err := memoryRepo.ListFiles()
+	if err != nil {
+		return fmt.Errorf("failed to list repository files: %w", err)
+	}
+
+	// Find README.md (case insensitive)
+	var readmeFile *git.FileInfo
+	readmePath := ""
+	for i, file := range files {
+		fileName := strings.ToLower(file.Path)
+		if fileName == "readme.md" || fileName == "readme.txt" || fileName == "readme" {
+			readmeFile = &files[i]
+			readmePath = file.Path
+			break
+		}
+	}
+
+	// If no README found, create one
+	if readmeFile == nil {
+		readmePath = "README.md"
+		readmeContent := fmt.Sprintf("# %s\n\nMigrated from Bitbucket to GitHub.\n\n", ms.config.TargetRepositoryName)
+		readmeFile = &git.FileInfo{
+			Path:    readmePath,
+			Content: []byte(readmeContent),
+			Mode:    0644,
+		}
+	}
+
+	// Add a blank line to the README content
+	newContent := string(readmeFile.Content)
+	if !strings.HasSuffix(newContent, "\n") {
+		newContent += "\n"
+	}
+	newContent += "\n" // Add blank line
+
+	// Update the file in memory
+	updatedFile := git.FileInfo{
+		Path:    readmePath,
+		Content: []byte(newContent),
+		Mode:    readmeFile.Mode,
+	}
+
+	err = memoryRepo.UpdateFiles([]git.FileInfo{updatedFile})
+	if err != nil {
+		return fmt.Errorf("failed to update README.md: %w", err)
+	}
+
+	// Commit the change directly to main branch
+	err = memoryRepo.CreateBranchAndCommit("main", "chore: trigger pipeline after migration")
+	if err != nil {
+		return fmt.Errorf("failed to commit README.md change: %w", err)
+	}
+
+	// Push the change to GitHub
+	err = memoryRepo.PushAllBranchesToRemote(ctx, githubRepo.CloneURL, ms.githubToken)
+	if err != nil {
+		return fmt.Errorf("failed to push pipeline trigger commit: %w", err)
+	}
+
+	return nil
 }
