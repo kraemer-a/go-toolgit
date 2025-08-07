@@ -653,6 +653,11 @@ func (s *Service) ValidateMigrationConfig(config MigrationConfig) error {
 
 // MigrateRepository performs repository migration from Bitbucket to GitHub
 func (s *Service) MigrateRepository(config MigrationConfig) (*MigrationResult, error) {
+	return s.MigrateRepositoryWithCallback(config, nil)
+}
+
+// MigrateRepositoryWithCallback performs repository migration with an optional live progress callback
+func (s *Service) MigrateRepositoryWithCallback(config MigrationConfig, liveProgressCallback func([]MigrationStep)) (*MigrationResult, error) {
 	ctx := context.Background()
 
 	// Create Bitbucket client if Bitbucket configuration is available
@@ -663,7 +668,7 @@ func (s *Service) MigrateRepository(config MigrationConfig) (*MigrationResult, e
 		bitbucketClient = nil
 	}
 
-	// Create migration service with progress callback
+	// Create migration service with progress callback that updates both local steps and provides live updates
 	var steps []MigrationStep
 	progressCallback := func(step MigrationStep) {
 		// Update the steps slice - find and update the matching step
@@ -672,6 +677,12 @@ func (s *Service) MigrateRepository(config MigrationConfig) (*MigrationResult, e
 				steps[i] = step
 				break
 			}
+		}
+		s.logger.Info("Migration progress update", "step", step.Description, "status", step.Status, "progress", step.Progress)
+
+		// Call live progress callback for GUI updates if provided
+		if liveProgressCallback != nil {
+			liveProgressCallback(steps)
 		}
 	}
 

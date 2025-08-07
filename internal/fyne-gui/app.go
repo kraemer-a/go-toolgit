@@ -1021,24 +1021,36 @@ func (f *FyneApp) handleMigrationDryRun() {
 
 func (f *FyneApp) handleStartMigration() {
 	f.setStatus("Starting repository migration...")
+	f.showLoading("Preparing migration...")
 
 	config := f.collectMigrationConfig()
 	config.DryRun = false
 
 	go func() {
-		result, err := f.service.MigrateRepository(config)
+		// Create live progress callback for real-time updates
+		liveProgressCallback := func(steps []MigrationStep) {
+			fyne.Do(func() {
+				f.displayMigrationSteps(steps)
+			})
+		}
+
+		result, err := f.service.MigrateRepositoryWithCallback(config, liveProgressCallback)
+		f.hideLoading()
+
 		if err != nil {
-			f.setStatus(fmt.Sprintf("Migration failed: %v", err))
+			f.setStatusError(fmt.Sprintf("Migration failed: %v", err))
 			return
 		}
 
+		// Display final migration steps with progress
 		fyne.Do(func() {
 			f.displayMigrationSteps(result.Steps)
 		})
+
 		if result.Success {
-			f.setStatus(fmt.Sprintf("Migration completed! Repository: %s", result.GitHubRepoURL))
+			f.setStatusSuccess(fmt.Sprintf("Migration completed! Repository: %s", result.GitHubRepoURL))
 		} else {
-			f.setStatus(fmt.Sprintf("Migration failed: %s", result.Message))
+			f.setStatusError(fmt.Sprintf("Migration failed: %s", result.Message))
 		}
 
 		// Refresh rate limit after GitHub API calls during migration
