@@ -794,9 +794,14 @@ func (f *FyneApp) handleValidateConfig() {
 		f.setStatusSuccess("Configuration validated successfully!")
 		f.operationStatus.SetOperation(OperationIdle, "")
 
-		// Increment API call counter and refresh rate limit after GitHub API call
+		// Increment API call counter and refresh rate limit only for GitHub
 		f.operationStatus.IncrementAPICall()
-		f.refreshRateLimit()
+		if provider == "github" {
+			f.refreshRateLimit()
+		} else {
+			// For Bitbucket, show Bitbucket mode in rate limit status
+			f.rateLimitStatus.ShowBitbucketMode()
+		}
 	}()
 }
 
@@ -2413,6 +2418,19 @@ func (f *FyneApp) openURL(urlString string) {
 func (f *FyneApp) refreshRateLimit() {
 	if f.service == nil {
 		f.rateLimitStatus.ShowError(fmt.Errorf("service not initialized"))
+		return
+	}
+
+	// Check if current provider supports rate limiting
+	provider := "github" // default
+	if f.providerSelect.Selected == "Use Bitbucket" {
+		provider = "bitbucket"
+	}
+
+	// Rate limiting is only supported for GitHub
+	if provider != "github" {
+		// Hide rate limit status for non-GitHub providers
+		f.rateLimitStatus.ShowBitbucketMode()
 		return
 	}
 

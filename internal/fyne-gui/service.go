@@ -306,24 +306,33 @@ func (s *Service) InitializeServiceConfig(configData ConfigData) error {
 	s.config.PullRequest.BodyTemplate = configData.PRBodyTemplate
 	s.config.PullRequest.BranchPrefix = configData.BranchPrefix
 
-	// Create GitHub client config
-	githubConfig := &github.Config{
-		BaseURL:      s.config.GitHub.BaseURL,
-		Token:        s.config.GitHub.Token,
-		Timeout:      s.config.GitHub.Timeout,
-		MaxRetries:   s.config.GitHub.MaxRetries,
-		WaitForReset: s.config.GitHub.WaitForRateLimit,
-	}
+	// Initialize GitHub client only if using GitHub provider
+	if configData.Provider == "github" {
+		// Create GitHub client config
+		githubConfig := &github.Config{
+			BaseURL:      s.config.GitHub.BaseURL,
+			Token:        s.config.GitHub.Token,
+			Timeout:      s.config.GitHub.Timeout,
+			MaxRetries:   s.config.GitHub.MaxRetries,
+			WaitForReset: s.config.GitHub.WaitForRateLimit,
+		}
 
-	// Initialize GitHub client
-	var err error
-	s.githubClient, err = github.NewClient(githubConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create GitHub client: %w", err)
-	}
+		// Initialize GitHub client
+		var err error
+		s.githubClient, err = github.NewClient(githubConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create GitHub client: %w", err)
+		}
 
-	// Initialize git memory operations
-	s.gitOps = git.NewMemoryOperations(configData.Token)
+		// Initialize git memory operations with GitHub token
+		s.gitOps = git.NewMemoryOperations(configData.Token)
+	} else {
+		// Clear GitHub client when using Bitbucket
+		s.githubClient = nil
+		// For Bitbucket, we don't initialize git operations here as they're provider-agnostic
+		// Git operations will be initialized with appropriate credentials when needed
+		s.gitOps = nil
+	}
 
 	// Initialize replacement engine (will set rules later)
 	var err2 error
@@ -744,6 +753,11 @@ func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 
 // GetRateLimitInfo retrieves GitHub API rate limit information
 func (s *Service) GetRateLimitInfo() (*RateLimitInfo, error) {
+	// Rate limiting is only applicable for GitHub provider
+	if s.config.Provider != "github" {
+		return nil, fmt.Errorf("rate limit information is only available for GitHub provider (current: %s)", s.config.Provider)
+	}
+
 	if s.githubClient == nil {
 		return nil, fmt.Errorf("GitHub client not initialized")
 	}

@@ -253,13 +253,13 @@ func (f *FloatingActionButton) MinSize() fyne.Size {
 type RateLimitStatus struct {
 	widget.BaseWidget
 
-	CoreLabel     *widget.Label
-	SearchLabel   *widget.Label
-	CoreProgress  *widget.ProgressBar
+	CoreLabel      *widget.Label
+	SearchLabel    *widget.Label
+	CoreProgress   *widget.ProgressBar
 	SearchProgress *widget.ProgressBar
-	LastUpdate    *widget.Label
-	container     *fyne.Container
-	
+	LastUpdate     *widget.Label
+	container      *fyne.Container
+
 	onRefresh func() // Callback to refresh rate limit data
 }
 
@@ -273,7 +273,7 @@ func NewRateLimitStatus(onRefresh func()) *RateLimitStatus {
 		LastUpdate:     widget.NewLabel(""),
 		onRefresh:      onRefresh,
 	}
-	
+
 	// Style the labels with center alignment
 	r.CoreLabel.TextStyle = fyne.TextStyle{Bold: true}
 	r.CoreLabel.Alignment = fyne.TextAlignCenter
@@ -281,11 +281,11 @@ func NewRateLimitStatus(onRefresh func()) *RateLimitStatus {
 	r.SearchLabel.Alignment = fyne.TextAlignCenter
 	r.LastUpdate.TextStyle = fyne.TextStyle{Italic: true}
 	r.LastUpdate.Alignment = fyne.TextAlignCenter
-	
+
 	// Set initial progress values
 	r.CoreProgress.SetValue(1.0)
 	r.SearchProgress.SetValue(1.0)
-	
+
 	r.ExtendBaseWidget(r)
 	return r
 }
@@ -297,13 +297,13 @@ func (r *RateLimitStatus) CreateRenderer() fyne.WidgetRenderer {
 		container.NewCenter(r.CoreLabel),
 		r.CoreProgress,
 	)
-	
-	// Create centered search section  
+
+	// Create centered search section
 	searchSection := container.NewVBox(
 		container.NewCenter(r.SearchLabel),
 		r.SearchProgress,
 	)
-	
+
 	// Create compact layout for status bar
 	r.container = container.NewHBox(
 		widget.NewIcon(theme.InfoIcon()),
@@ -313,7 +313,7 @@ func (r *RateLimitStatus) CreateRenderer() fyne.WidgetRenderer {
 		widget.NewSeparator(),
 		container.NewCenter(r.LastUpdate),
 	)
-	
+
 	return widget.NewSimpleRenderer(r.container)
 }
 
@@ -322,7 +322,7 @@ func (r *RateLimitStatus) UpdateRateLimit(coreRemaining, coreLimit, searchRemain
 	// Calculate values outside of fyne.Do to avoid heavy computation on UI thread
 	corePercentage := float64(coreRemaining) / float64(coreLimit)
 	searchPercentage := float64(searchRemaining) / float64(searchLimit)
-	
+
 	// Determine importance levels
 	var coreImportance, searchImportance widget.Importance
 	if corePercentage < 0.1 { // Less than 10%
@@ -332,7 +332,7 @@ func (r *RateLimitStatus) UpdateRateLimit(coreRemaining, coreLimit, searchRemain
 	} else {
 		coreImportance = widget.SuccessImportance
 	}
-	
+
 	if searchPercentage < 0.2 { // Less than 20% (more aggressive for search API)
 		searchImportance = widget.DangerImportance
 	} else if searchPercentage < 0.5 { // Less than 50%
@@ -340,13 +340,13 @@ func (r *RateLimitStatus) UpdateRateLimit(coreRemaining, coreLimit, searchRemain
 	} else {
 		searchImportance = widget.SuccessImportance
 	}
-	
+
 	// All UI updates must be done on the main thread
 	fyne.Do(func() {
 		// Update labels
 		r.CoreLabel.SetText(fmt.Sprintf("Core: %d/%d", coreRemaining, coreLimit))
 		r.SearchLabel.SetText(fmt.Sprintf("Search: %d/%d", searchRemaining, searchLimit))
-		
+
 		// Update progress bars
 		if coreLimit > 0 {
 			r.CoreProgress.SetValue(float64(coreRemaining) / float64(coreLimit))
@@ -354,10 +354,10 @@ func (r *RateLimitStatus) UpdateRateLimit(coreRemaining, coreLimit, searchRemain
 		if searchLimit > 0 {
 			r.SearchProgress.SetValue(float64(searchRemaining) / float64(searchLimit))
 		}
-		
+
 		// Update timestamp
 		r.LastUpdate.SetText(fmt.Sprintf("Updated: %s", time.Now().Format("15:04:05")))
-		
+
 		// Apply importance levels
 		r.CoreLabel.Importance = coreImportance
 		r.SearchLabel.Importance = searchImportance
@@ -373,9 +373,24 @@ func (r *RateLimitStatus) ShowError(err error) {
 		r.LastUpdate.SetText(fmt.Sprintf("Error: %v", err))
 		r.CoreProgress.SetValue(0)
 		r.SearchProgress.SetValue(0)
-		
+
 		r.CoreLabel.Importance = widget.DangerImportance
 		r.SearchLabel.Importance = widget.DangerImportance
+	})
+}
+
+// ShowBitbucketMode displays a message indicating Bitbucket mode (no rate limits)
+func (r *RateLimitStatus) ShowBitbucketMode() {
+	// All UI updates must be done on the main thread
+	fyne.Do(func() {
+		r.CoreLabel.SetText("Bitbucket Mode")
+		r.SearchLabel.SetText("No Rate Limits")
+		r.LastUpdate.SetText("Bitbucket provider active")
+		r.CoreProgress.SetValue(1.0) // Show as full/unlimited
+		r.SearchProgress.SetValue(1.0)
+
+		r.CoreLabel.Importance = widget.MediumImportance
+		r.SearchLabel.Importance = widget.MediumImportance
 	})
 }
 
@@ -403,14 +418,14 @@ func (r *RateLimitStatus) MouseMoved(*desktop.MouseEvent) {}
 type OperationStatus struct {
 	widget.BaseWidget
 
-	StatusLabel     *widget.Label
-	APICallsLabel   *widget.Label
-	LastAPILabel    *widget.Label
-	StatusIcon      *widget.Icon
-	container       *fyne.Container
-	
-	apiCallsCount   int
-	lastAPITime     time.Time
+	StatusLabel   *widget.Label
+	APICallsLabel *widget.Label
+	LastAPILabel  *widget.Label
+	StatusIcon    *widget.Icon
+	container     *fyne.Container
+
+	apiCallsCount int
+	lastAPITime   time.Time
 }
 
 // OperationType represents different types of operations
@@ -435,7 +450,7 @@ func NewOperationStatus() *OperationStatus {
 		StatusIcon:    widget.NewIcon(theme.InfoIcon()),
 		apiCallsCount: 0,
 	}
-	
+
 	// Style the labels for compact display with center alignment
 	o.StatusLabel.TextStyle = fyne.TextStyle{Bold: true}
 	o.StatusLabel.Alignment = fyne.TextAlignCenter
@@ -443,11 +458,11 @@ func NewOperationStatus() *OperationStatus {
 	o.APICallsLabel.Alignment = fyne.TextAlignCenter
 	o.LastAPILabel.TextStyle = fyne.TextStyle{Italic: true}
 	o.LastAPILabel.Alignment = fyne.TextAlignCenter
-	
+
 	// Make API labels smaller
 	o.APICallsLabel.Resize(fyne.NewSize(50, o.APICallsLabel.MinSize().Height))
 	o.LastAPILabel.Resize(fyne.NewSize(80, o.LastAPILabel.MinSize().Height))
-	
+
 	o.ExtendBaseWidget(o)
 	return o
 }
@@ -459,12 +474,12 @@ func (o *OperationStatus) CreateRenderer() fyne.WidgetRenderer {
 		container.NewCenter(o.StatusLabel),
 		container.NewCenter(container.NewHBox(o.APICallsLabel, o.LastAPILabel)),
 	)
-	
+
 	o.container = container.NewHBox(
 		o.StatusIcon,
 		statusInfo,
 	)
-	
+
 	return widget.NewSimpleRenderer(o.container)
 }
 
@@ -508,7 +523,7 @@ func (o *OperationStatus) SetOperation(opType OperationType, message string) {
 func (o *OperationStatus) IncrementAPICall() {
 	o.apiCallsCount++
 	o.lastAPITime = time.Now()
-	
+
 	fyne.Do(func() {
 		o.APICallsLabel.SetText(fmt.Sprintf("API: %d", o.apiCallsCount))
 		o.LastAPILabel.SetText(fmt.Sprintf("Last: %s", o.lastAPITime.Format("15:04:05")))
@@ -518,7 +533,7 @@ func (o *OperationStatus) IncrementAPICall() {
 // ResetAPICounter resets the API call counter (typically when rate limits reset)
 func (o *OperationStatus) ResetAPICounter() {
 	o.apiCallsCount = 0
-	
+
 	fyne.Do(func() {
 		o.APICallsLabel.SetText("API: 0")
 		o.LastAPILabel.SetText("Last: Reset")
