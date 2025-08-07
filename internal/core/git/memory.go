@@ -428,11 +428,10 @@ func (mr *MemoryRepository) PushAllReferencesToRemoteWithOptions(ctx context.Con
 			if strings.HasPrefix(refStr, "refs/remotes/origin/") {
 				localBranch := strings.Replace(refStr, "refs/remotes/origin/", "refs/heads/", 1)
 
-				// Handle master→main transformation for remote refs too
+				// Skip remote master refs when transformation is enabled to avoid conflicts
 				if transformMasterToMain && localBranch == "refs/heads/master" {
-					localBranch = "refs/heads/main"
-					masterTransformed = true
-					log.Printf("[INFO] Transforming remote master branch to main during migration")
+					log.Printf("[INFO] Skipping remote master ref during migration (local master→main transformation)")
+					return nil // Skip this reference entirely
 				}
 
 				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(localBranch))
@@ -536,11 +535,10 @@ func (mr *MemoryRepository) PushAllReferencesToRemoteWithResult(ctx context.Cont
 			if strings.HasPrefix(refStr, "refs/remotes/origin/") {
 				localBranch := strings.Replace(refStr, "refs/remotes/origin/", "refs/heads/", 1)
 
-				// Handle master→main transformation for remote refs too
+				// Skip remote master refs when transformation is enabled to avoid conflicts
 				if transformMasterToMain && localBranch == "refs/heads/master" {
-					localBranch = "refs/heads/main"
-					masterTransformed = true
-					log.Printf("[INFO] Transforming remote master branch to main during migration")
+					log.Printf("[INFO] Skipping remote master ref during migration (local master→main transformation)")
+					return nil // Skip this reference entirely
 				}
 
 				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(localBranch))

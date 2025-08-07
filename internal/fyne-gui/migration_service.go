@@ -526,8 +526,8 @@ func (ms *MigrationService) triggerPipeline(ctx context.Context, memoryRepo *git
 		return fmt.Errorf("failed to commit README.md change: %w", err)
 	}
 
-	// Push the change to GitHub
-	err = memoryRepo.PushAllBranchesToRemote(ctx, githubRepo.CloneURL, ms.githubToken)
+	// Push the change to GitHub (respecting master→main transformation)
+	err = memoryRepo.PushAllReferencesToRemoteWithOptions(ctx, githubRepo.CloneURL, ms.githubToken, ms.config.TransformMasterToMain)
 	if err != nil {
 		return fmt.Errorf("failed to push pipeline trigger commit: %w", err)
 	}
