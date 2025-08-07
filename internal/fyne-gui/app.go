@@ -685,8 +685,12 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 	migrateBtn := widget.NewButton("Start Migration", f.handleStartMigration)
 	migrateBtn.Importance = widget.HighImportance
 
-	// Progress area
+	// Progress area with compact layout
 	f.progressContainer = container.New(layout.NewVBoxLayout())
+
+	// Create scrollable progress area with fixed height
+	progressScroll := container.NewScroll(f.progressContainer)
+	progressScroll.SetMinSize(fyne.NewSize(0, 150)) // Fixed height of 150px
 
 	form := &widget.Form{
 		Items: []*widget.FormItem{
@@ -709,7 +713,7 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 		migrateBtn,
 	)
 
-	progressCard := widget.NewCard("Migration Progress", "Real-time migration status", f.progressContainer)
+	progressCard := widget.NewCard("Migration Progress", "Real-time migration status", progressScroll)
 
 	return container.New(
 		layout.NewVBoxLayout(),
@@ -1123,30 +1127,52 @@ func (f *FyneApp) displayMigrationSteps(steps []MigrationStep) {
 
 	for _, step := range steps {
 		statusIcon := "⏳"
+		var importance widget.Importance
+		showProgressBar := false
+
 		switch step.Status {
 		case "completed":
 			statusIcon = "✅"
+			importance = widget.LowImportance
 		case "failed":
 			statusIcon = "❌"
+			importance = widget.DangerImportance
 		case "running":
 			statusIcon = "🔄"
+			importance = widget.HighImportance
+			showProgressBar = true
+		default:
+			importance = widget.MediumImportance
 		}
 
-		stepLabel := widget.NewLabel(fmt.Sprintf("%s %s", statusIcon, step.Description))
-		if step.Message != "" {
-			stepLabel.Text += fmt.Sprintf(" - %s", step.Message)
+		// Create compact step label
+		stepText := fmt.Sprintf("%s %s", statusIcon, step.Description)
+		if step.Message != "" && step.Status != "pending" {
+			stepText += fmt.Sprintf(" - %s", step.Message)
 		}
 
-		progressBar := widget.NewProgressBar()
-		progressBar.SetValue(float64(step.Progress) / 100.0)
+		stepLabel := widget.NewLabel(stepText)
+		stepLabel.Importance = importance
+		if step.Status == "running" {
+			stepLabel.TextStyle = fyne.TextStyle{Bold: true}
+		}
 
-		stepContainer := container.New(
-			layout.NewVBoxLayout(),
-			stepLabel,
-			progressBar,
-		)
+		// Only show progress bar for running step
+		if showProgressBar {
+			progressBar := widget.NewProgressBar()
+			progressBar.SetValue(float64(step.Progress) / 100.0)
 
-		f.progressContainer.Add(stepContainer)
+			// Compact container with label and progress bar
+			stepContainer := container.New(
+				layout.NewVBoxLayout(),
+				stepLabel,
+				progressBar,
+			)
+			f.progressContainer.Add(stepContainer)
+		} else {
+			// Just add the label for non-running steps
+			f.progressContainer.Add(stepLabel)
+		}
 	}
 }
 
