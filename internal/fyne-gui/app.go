@@ -1043,6 +1043,11 @@ func (f *FyneApp) handleStartMigration() {
 	config.DryRun = false
 
 	go func() {
+		// Hide global loading spinner once migration starts - step-specific spinners will take over
+		fyne.Do(func() {
+			f.hideLoading()
+		})
+
 		// Create live progress callback for real-time updates
 		liveProgressCallback := func(steps []MigrationStep) {
 			fyne.Do(func() {
@@ -1051,7 +1056,6 @@ func (f *FyneApp) handleStartMigration() {
 		}
 
 		result, err := f.service.MigrateRepositoryWithCallback(config, liveProgressCallback)
-		f.hideLoading()
 
 		if err != nil {
 			f.setStatusError(fmt.Sprintf("Migration failed: %v", err))
