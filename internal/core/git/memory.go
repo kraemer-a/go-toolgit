@@ -123,6 +123,41 @@ func (m *MemoryOperations) CloneRepositoryWithBasicAuth(ctx context.Context, rep
 	}, nil
 }
 
+// CloneRepositoryWithMirror clones a repository as a mirror (all branches, tags, refs) using basic auth
+func (m *MemoryOperations) CloneRepositoryWithMirror(ctx context.Context, repoURL, fullName, username, password string) (*MemoryRepository, error) {
+	startTime := time.Now()
+
+	storage := memory.NewStorage()
+	// For mirror clone, we don't need a filesystem since it's a bare repository
+	fs := memfs.New()
+
+	auth := &http.BasicAuth{
+		Username: username, // Bitbucket username
+		Password: password, // Bitbucket password/app password
+	}
+
+	repo, err := git.Clone(storage, fs, &git.CloneOptions{
+		URL:        repoURL,
+		Auth:       auth,
+		Mirror:     true, // Mirror clone - gets all references
+		NoCheckout: true, // Bare repository - no working directory
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to mirror clone repository %s: %w", fullName, err)
+	}
+
+	cloneDuration := time.Since(startTime)
+	log.Printf("[INFO] Successfully mirror cloned repository %s using basic auth in %v", fullName, cloneDuration)
+
+	return &MemoryRepository{
+		repo:     repo,
+		fs:       fs,
+		auth:     auth,
+		repoURL:  repoURL,
+		fullName: fullName,
+	}, nil
+}
+
 // ListFiles returns all files in the repository
 func (mr *MemoryRepository) ListFiles() ([]FileInfo, error) {
 	var files []FileInfo
@@ -330,6 +365,76 @@ func (mr *MemoryRepository) PushAllBranchesToRemote(ctx context.Context, remoteU
 	})
 	if err != nil {
 		return fmt.Errorf("failed to push all branches to migration target: %w", err)
+	}
+
+	return nil
+}
+
+// PushAllReferencesToRemote pushes all references (branches, tags, etc.) to a different remote repository (mirror push)
+func (mr *MemoryRepository) PushAllReferencesToRemote(ctx context.Context, remoteURL, token string) error {
+	// Create authentication for the new remote
+	auth := &http.BasicAuth{
+		Username: "git", // Can be anything for GitHub PAT
+		Password: token,
+	}
+
+	// Add the new remote
+	_, err := mr.repo.CreateRemote(&config.RemoteConfig{
+		Name: "migration-target",
+		URLs: []string{remoteURL},
+	})
+	if err != nil {
+		// If remote already exists, that's fine
+		if err.Error() != "remote already exists" {
+			return fmt.Errorf("failed to create migration-target remote: %w", err)
+		}
+	}
+
+	// Get all references
+	refs, err := mr.repo.References()
+	if err != nil {
+		return fmt.Errorf("failed to get references: %w", err)
+	}
+
+	var refSpecs []config.RefSpec
+	err = refs.ForEach(func(ref *plumbing.Reference) error {
+		refName := ref.Name()
+
+		// Handle branches, tags, and notes
+		if refName.IsBranch() || refName.IsTag() || refName.IsNote() {
+			// Direct mapping for branches and tags
+			refSpec := config.RefSpec(refName + ":" + refName)
+			refSpecs = append(refSpecs, refSpec)
+		} else if refName.IsRemote() {
+			// Map remote refs to local branches (refs/remotes/origin/branch -> refs/heads/branch)
+			refStr := refName.String()
+			if strings.HasPrefix(refStr, "refs/remotes/origin/") {
+				localBranch := strings.Replace(refStr, "refs/remotes/origin/", "refs/heads/", 1)
+				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(localBranch))
+				refSpecs = append(refSpecs, refSpec)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to iterate references: %w", err)
+	}
+
+	if len(refSpecs) == 0 {
+		return fmt.Errorf("no references found to push")
+	}
+
+	log.Printf("[INFO] Pushing %d references to migration target", len(refSpecs))
+
+	// Push all references to the new remote with force to handle any conflicts
+	err = mr.repo.PushContext(ctx, &git.PushOptions{
+		RemoteName: "migration-target",
+		RefSpecs:   refSpecs,
+		Auth:       auth,
+		Force:      true, // Force push to ensure complete migration
+	})
+	if err != nil {
+		return fmt.Errorf("failed to push all references to migration target: %w", err)
 	}
 
 	return nil

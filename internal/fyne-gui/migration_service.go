@@ -41,8 +41,8 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 	steps := []MigrationStep{
 		{Description: "Validating source repository", Status: "pending", Progress: 0},
 		{Description: "Creating target repository", Status: "pending", Progress: 0},
-		{Description: "Cloning source repository", Status: "pending", Progress: 0},
-		{Description: "Pushing to target repository", Status: "pending", Progress: 0},
+		{Description: "Mirror cloning source repository (all branches & tags)", Status: "pending", Progress: 0},
+		{Description: "Pushing all references to target repository", Status: "pending", Progress: 0},
 		{Description: "Configuring teams", Status: "pending", Progress: 0},
 		{Description: "Setting up webhooks", Status: "pending", Progress: 0},
 		{Description: "Triggering pipeline", Status: "pending", Progress: 0},
@@ -78,23 +78,23 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 		ms.updateStep(&steps[1], "completed", 100, "Would create target repository")
 	}
 
-	// Step 3: Clone source repository
-	ms.updateStep(&steps[2], "running", 0, "Cloning from Bitbucket...")
+	// Step 3: Mirror clone source repository
+	ms.updateStep(&steps[2], "running", 0, "Mirror cloning from Bitbucket (all branches & tags)...")
 	var memoryRepo *git.MemoryRepository
 	if !ms.config.DryRun {
 		memoryRepo, err = ms.cloneFromBitbucket(ctx, bitbucketRepo)
 		if err != nil {
 			ms.updateStep(&steps[2], "failed", 0, fmt.Sprintf("Failed: %v", err))
-			result.Message = fmt.Sprintf("Repository cloning failed: %v", err)
+			result.Message = fmt.Sprintf("Repository mirror cloning failed: %v", err)
 			return result, err
 		}
-		ms.updateStep(&steps[2], "completed", 100, "Repository cloned successfully")
+		ms.updateStep(&steps[2], "completed", 100, "Repository mirror cloned successfully (all branches & tags)")
 	} else {
-		ms.updateStep(&steps[2], "completed", 100, "Would clone source repository")
+		ms.updateStep(&steps[2], "completed", 100, "Would mirror clone source repository (all branches & tags)")
 	}
 
-	// Step 4: Push to target repository (skip in dry run)
-	ms.updateStep(&steps[3], "running", 0, "Pushing to GitHub...")
+	// Step 4: Push all references to target repository (skip in dry run)
+	ms.updateStep(&steps[3], "running", 0, "Pushing all references (branches, tags) to GitHub...")
 	if !ms.config.DryRun && githubRepo != nil && memoryRepo != nil {
 		err = ms.pushToGitHub(ctx, memoryRepo, githubRepo)
 		if err != nil {
@@ -102,9 +102,9 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 			result.Message = fmt.Sprintf("Push to GitHub failed: %v", err)
 			return result, err
 		}
-		ms.updateStep(&steps[3], "completed", 100, "Code pushed to GitHub")
+		ms.updateStep(&steps[3], "completed", 100, "All references pushed to GitHub (branches, tags)")
 	} else {
-		ms.updateStep(&steps[3], "completed", 100, "Would push to target repository")
+		ms.updateStep(&steps[3], "completed", 100, "Would push all references to target repository")
 	}
 
 	// Step 5: Configure teams (skip in dry run)
@@ -260,10 +260,10 @@ func (ms *MigrationService) cloneFromBitbucket(ctx context.Context, bitbucketRep
 	// Create git operations instance (token not used for basic auth)
 	bitbucketGitOps := git.NewMemoryOperations("")
 
-	// Clone using Bitbucket basic authentication
-	memoryRepo, err := bitbucketGitOps.CloneRepositoryWithBasicAuth(ctx, httpsURL, bitbucketRepo.FullName, ms.bitbucketUsername, ms.bitbucketPassword)
+	// Mirror clone using Bitbucket basic authentication (gets all branches, tags, refs)
+	memoryRepo, err := bitbucketGitOps.CloneRepositoryWithMirror(ctx, httpsURL, bitbucketRepo.FullName, ms.bitbucketUsername, ms.bitbucketPassword)
 	if err != nil {
-		return nil, fmt.Errorf("failed to clone repository %s with basic auth: %w", bitbucketRepo.FullName, err)
+		return nil, fmt.Errorf("failed to mirror clone repository %s with basic auth: %w", bitbucketRepo.FullName, err)
 	}
 
 	return memoryRepo, nil
@@ -274,10 +274,10 @@ func (ms *MigrationService) pushToGitHub(ctx context.Context, memoryRepo *git.Me
 	// Get GitHub token from git operations (we need access to this)
 	// For now, we'll assume the token is available through the service configuration
 
-	// Push all branches to the GitHub repository
-	err := memoryRepo.PushAllBranchesToRemote(ctx, githubRepo.CloneURL, ms.getGitHubToken())
+	// Push all references (branches, tags, notes, etc.) to the GitHub repository (mirror push)
+	err := memoryRepo.PushAllReferencesToRemote(ctx, githubRepo.CloneURL, ms.getGitHubToken())
 	if err != nil {
-		return fmt.Errorf("failed to push all branches to GitHub: %w", err)
+		return fmt.Errorf("failed to push all references to GitHub: %w", err)
 	}
 
 	return nil
