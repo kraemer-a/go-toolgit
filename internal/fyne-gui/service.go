@@ -573,13 +573,9 @@ func (s *Service) MigrateRepository(config MigrationConfig) (*MigrationResult, e
 	// Create Bitbucket client if Bitbucket configuration is available
 	bitbucketClient, err := s.createBitbucketClient()
 	if err != nil {
-		return &MigrationResult{
-			Success: false,
-			Message: fmt.Sprintf("Failed to initialize Bitbucket client: %v", err),
-			Steps: []MigrationStep{
-				{Description: "Initialize Bitbucket client", Status: "failed", Progress: 0, Message: err.Error()},
-			},
-		}, err
+		// Log the error but don't fail immediately - we might still be able to use credentials directly
+		s.logger.Warn("Could not create Bitbucket client, will try with credentials directly", "error", err)
+		bitbucketClient = nil
 	}
 
 	// Create migration service with progress callback
@@ -595,10 +591,16 @@ func (s *Service) MigrateRepository(config MigrationConfig) (*MigrationResult, e
 	}
 
 	migrationService := NewMigrationService(s.githubClient, s.gitOps, &config, s.config.GitHub.Token, progressCallback)
+
+	// Always set Bitbucket credentials if available, even if client creation failed
+	// This allows the migration to work with credentials directly for git operations
+	if s.config.Bitbucket.Username != "" && s.config.Bitbucket.Password != "" {
+		migrationService.SetBitbucketCredentials(s.config.Bitbucket.Username, s.config.Bitbucket.Password)
+	}
+
+	// Set the Bitbucket client if it was successfully created
 	if bitbucketClient != nil {
 		migrationService.SetBitbucketClient(bitbucketClient)
-		// Set Bitbucket credentials for authentication
-		migrationService.SetBitbucketCredentials(s.config.Bitbucket.Username, s.config.Bitbucket.Password)
 	}
 
 	// Initialize steps for tracking
@@ -622,33 +624,29 @@ func (s *Service) MigrateRepository(config MigrationConfig) (*MigrationResult, e
 	return result, nil
 }
 
-// createBitbucketClient creates a Bitbucket client from secure configuration
+// createBitbucketClient creates a Bitbucket client from service configuration
 func (s *Service) createBitbucketClient() (*bitbucket.Client, error) {
-	// Load secure configuration to get decrypted Bitbucket password
-	cfg, err := config.LoadSecure()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load secure configuration: %w", err)
-	}
-
-	if cfg.Bitbucket.BaseURL == "" || cfg.Bitbucket.Username == "" || cfg.Bitbucket.Password == "" {
+	// Use the service's current configuration (which includes GUI values)
+	// instead of loading from file to ensure consistency
+	if s.config.Bitbucket.BaseURL == "" || s.config.Bitbucket.Username == "" || s.config.Bitbucket.Password == "" {
 		// Return nil client if Bitbucket is not configured - migration service will handle this
 		return nil, fmt.Errorf("Bitbucket configuration incomplete - base_url, username, and password/app_password required")
 	}
 
-	timeout := cfg.Bitbucket.Timeout
+	timeout := s.config.Bitbucket.Timeout
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
 
-	maxRetries := cfg.Bitbucket.MaxRetries
+	maxRetries := s.config.Bitbucket.MaxRetries
 	if maxRetries == 0 {
 		maxRetries = 3
 	}
 
 	bitbucketConfig := &bitbucket.Config{
-		BaseURL:    cfg.Bitbucket.BaseURL,
-		Username:   cfg.Bitbucket.Username,
-		Password:   cfg.Bitbucket.Password, // This is automatically decrypted
+		BaseURL:    s.config.Bitbucket.BaseURL,
+		Username:   s.config.Bitbucket.Username,
+		Password:   s.config.Bitbucket.Password, // Already decrypted if loaded from file
 		Timeout:    timeout,
 		MaxRetries: maxRetries,
 	}
@@ -687,29 +685,19 @@ func (s *Service) ReadConfigFromFile() (*ConfigData, error) {
 		MigrationTargetRepo: viper.GetString("migration.target_repo"),
 		MigrationWebhookURL: viper.GetString("migration.webhook_url"),
 		MigrationTeams:      viper.GetStringMapString("migration.teams"),
-	}
 
-	// Load provider-specific fields based on the current provider
-	if provider == "github" {
-		configData.GitHubURL = cfg.GitHub.BaseURL
-		configData.Token = cfg.GitHub.Token // This is now automatically decrypted
-		configData.Organization = cfg.GitHub.Org
-		configData.Team = cfg.GitHub.Team
-		// Set default values for unused Bitbucket fields
-		configData.BitbucketURL = ""
-		configData.Username = ""
-		configData.Password = ""
-		configData.Project = ""
-	} else if provider == "bitbucket" {
-		configData.BitbucketURL = cfg.Bitbucket.BaseURL
-		configData.Username = cfg.Bitbucket.Username
-		configData.Password = cfg.Bitbucket.Password // This is now automatically decrypted
-		configData.Project = cfg.Bitbucket.Project
-		// Set default values for unused GitHub fields
-		configData.GitHubURL = ""
-		configData.Token = ""
-		configData.Organization = ""
-		configData.Team = ""
+		// Always load BOTH provider configurations regardless of active provider
+		// GitHub configuration
+		GitHubURL:    cfg.GitHub.BaseURL,
+		Token:        cfg.GitHub.Token, // This is now automatically decrypted
+		Organization: cfg.GitHub.Org,
+		Team:         cfg.GitHub.Team,
+
+		// Bitbucket configuration
+		BitbucketURL: cfg.Bitbucket.BaseURL,
+		Username:     cfg.Bitbucket.Username,
+		Password:     cfg.Bitbucket.Password, // This is now automatically decrypted
+		Project:      cfg.Bitbucket.Project,
 	}
 
 	return configData, nil

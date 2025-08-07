@@ -244,7 +244,7 @@ func (f *FyneApp) setupUI() {
 	// Enhanced status bar with icon and rate limit status
 	f.statusLabel = widget.NewLabel("Ready")
 	f.statusLabel.TextStyle = fyne.TextStyle{Bold: true}
-	f.statusLabel.Alignment = fyne.TextAlignCenter
+	f.statusLabel.Alignment = fyne.TextAlignLeading // Left-aligned for better readability
 	f.statusIcon = widget.NewIcon(theme.InfoIcon())
 
 	// Create rate limit status widget with refresh callback
@@ -254,7 +254,7 @@ func (f *FyneApp) setupUI() {
 	f.operationStatus = NewOperationStatus()
 
 	// Create a more compact layout with main status on left, API info on right
-	leftStatus := container.NewHBox(f.statusIcon, container.NewCenter(f.statusLabel))
+	leftStatus := container.NewHBox(f.statusIcon, f.statusLabel)
 	rightStatus := container.NewHBox(f.operationStatus, widget.NewSeparator(), f.rateLimitStatus)
 
 	statusContent := container.New(
@@ -723,7 +723,7 @@ func (f *FyneApp) handleValidateConfig() {
 		provider = "bitbucket"
 	}
 
-	// Create config data with only the selected provider's configuration
+	// Create config data with BOTH provider configurations to preserve all values
 	configData := ConfigData{
 		Provider:        provider,
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
@@ -731,46 +731,51 @@ func (f *FyneApp) handleValidateConfig() {
 		PRTitleTemplate: f.prTitleEntry.Text,
 		PRBodyTemplate:  f.prBodyEntry.Text,
 		BranchPrefix:    f.branchPrefixEntry.Text,
+
+		// Always include both provider configurations to avoid data loss
+		// GitHub configuration
+		GitHubURL:    f.githubURLEntry.Text,
+		Token:        f.githubTokenEntry.Text,
+		Organization: f.githubOrgEntry.Text,
+		Team:         f.githubTeamEntry.Text,
+
+		// Bitbucket configuration
+		BitbucketURL: f.bitbucketURLEntry.Text,
+		Username:     f.bitbucketUsernameEntry.Text,
+		Password:     f.bitbucketPasswordEntry.Text,
+		Project:      f.bitbucketProjectEntry.Text,
 	}
 
-	// Only include the configuration for the provider being validated
+	// Validate the active provider's required fields
 	if provider == "github" {
 		f.operationStatus.SetOperation(OperationAPIValidation, "Testing GitHub API connection")
 
 		// Check if required GitHub fields are filled (Organization and Team are optional)
-		if f.githubURLEntry.Text == "" || f.githubTokenEntry.Text == "" {
+		if configData.GitHubURL == "" || configData.Token == "" {
 			f.hideLoading()
 			f.setStatusError("Please fill in GitHub URL and Personal Access Token")
 			f.operationStatus.SetOperation(OperationIdle, "")
 			return
 		}
-
-		configData.GitHubURL = f.githubURLEntry.Text
-		configData.Token = f.githubTokenEntry.Text
-		configData.Organization = f.githubOrgEntry.Text
-		configData.Team = f.githubTeamEntry.Text
 	} else {
 		f.operationStatus.SetOperation(OperationAPIValidation, "Testing Bitbucket API connection")
 
 		// Check if Bitbucket fields are filled
-		if f.bitbucketURLEntry.Text == "" || f.bitbucketUsernameEntry.Text == "" ||
-			f.bitbucketPasswordEntry.Text == "" || f.bitbucketProjectEntry.Text == "" {
+		if configData.BitbucketURL == "" || configData.Username == "" ||
+			configData.Password == "" || configData.Project == "" {
 			f.hideLoading()
 			f.setStatusError("Please fill in all Bitbucket configuration fields")
 			f.operationStatus.SetOperation(OperationIdle, "")
 			return
 		}
-
-		configData.BitbucketURL = f.bitbucketURLEntry.Text
-		configData.Username = f.bitbucketUsernameEntry.Text
-		configData.Password = f.bitbucketPasswordEntry.Text
-		configData.Project = f.bitbucketProjectEntry.Text
 	}
 
 	f.showLoading("Validating configuration...")
 
 	go func() {
-		err := f.service.UpdateConfig(configData)
+		// Use InitializeServiceConfig instead of UpdateConfig to avoid saving to disk
+		// This only updates the in-memory configuration for validation
+		err := f.service.InitializeServiceConfig(configData)
 		if err != nil {
 			f.hideLoading()
 			f.setStatusError(fmt.Sprintf("Configuration error: %v", err))
@@ -1117,10 +1122,24 @@ func (f *FyneApp) displayMigrationSteps(steps []MigrationStep) {
 	}
 }
 
+// truncateText truncates text to fit within the specified character limit
+func (f *FyneApp) truncateText(text string, maxWidth int) string {
+	if len(text) <= maxWidth {
+		return text
+	}
+
+	// Truncate and add ellipsis
+	if maxWidth > 3 {
+		return text[:maxWidth-3] + "..."
+	}
+	return "..."
+}
+
 func (f *FyneApp) setStatus(status string) {
 	f.logger.Info("Status update", "status", status)
+	truncatedStatus := f.truncateText(status, 100) // Truncate at ~100 characters
 	fyne.Do(func() {
-		f.statusLabel.SetText(status)
+		f.statusLabel.SetText(truncatedStatus)
 		// Reset to default styling
 		f.statusLabel.Importance = widget.MediumImportance
 		f.statusIcon.SetResource(theme.InfoIcon())
@@ -1145,8 +1164,9 @@ func (f *FyneApp) hideLoading() {
 // setStatusSuccess sets status with green styling for successful operations
 func (f *FyneApp) setStatusSuccess(status string) {
 	f.logger.Info("Status update (success)", "status", status)
+	truncatedStatus := f.truncateText(status, 100) // Truncate at ~100 characters
 	fyne.Do(func() {
-		f.statusLabel.SetText(status)
+		f.statusLabel.SetText(truncatedStatus)
 		f.statusIcon.SetResource(theme.ConfirmIcon())
 		f.statusLabel.Importance = widget.SuccessImportance
 		// Show toast notification
@@ -1157,8 +1177,9 @@ func (f *FyneApp) setStatusSuccess(status string) {
 // setStatusError sets status with red styling for error operations
 func (f *FyneApp) setStatusError(status string) {
 	f.logger.Info("Status update (error)", "status", status)
+	truncatedStatus := f.truncateText(status, 100) // Truncate at ~100 characters
 	fyne.Do(func() {
-		f.statusLabel.SetText(status)
+		f.statusLabel.SetText(truncatedStatus)
 		f.statusIcon.SetResource(theme.ErrorIcon())
 		f.statusLabel.Importance = widget.DangerImportance
 		// Show toast notification
