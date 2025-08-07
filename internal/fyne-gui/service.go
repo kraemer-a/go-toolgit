@@ -346,18 +346,57 @@ func (s *Service) UpdateConfig(configData ConfigData) error {
 	return s.InitializeServiceConfig(configData)
 }
 
-// ValidateAccess validates the GitHub access configuration
+// ValidateAccess validates the access configuration for the selected provider
 func (s *Service) ValidateAccess() error {
+	ctx := context.Background()
+
+	// Check which provider is configured and validate accordingly
+	if s.config.Provider == "bitbucket" {
+		return s.validateBitbucketAccess(ctx)
+	}
+
+	// Default to GitHub validation
+	return s.validateGitHubAccess(ctx)
+}
+
+// validateGitHubAccess validates GitHub API access
+func (s *Service) validateGitHubAccess(ctx context.Context) error {
 	if s.githubClient == nil {
 		return fmt.Errorf("GitHub client not initialized")
 	}
-
-	ctx := context.Background()
 
 	// Test GitHub API access - validate token access and org/team if specified
 	err := s.githubClient.ValidateAccess(ctx, s.config.GitHub.Org, s.config.GitHub.Team)
 	if err != nil {
 		return fmt.Errorf("failed to validate GitHub access: %w", err)
+	}
+
+	return nil
+}
+
+// validateBitbucketAccess validates Bitbucket API access
+func (s *Service) validateBitbucketAccess(ctx context.Context) error {
+	// Create Bitbucket client for validation
+	bitbucketClient, err := s.createBitbucketClient()
+	if err != nil {
+		return fmt.Errorf("failed to create Bitbucket client: %w", err)
+	}
+
+	// Test Bitbucket API access by fetching the project
+	if s.config.Bitbucket.Project != "" {
+		// Try to get project information
+		project, err := bitbucketClient.GetProject(ctx, s.config.Bitbucket.Project)
+		if err != nil {
+			return fmt.Errorf("failed to validate Bitbucket access (project: %s): %w", s.config.Bitbucket.Project, err)
+		}
+		s.logger.Info("Bitbucket project validated successfully", "project", project.Key)
+	} else {
+		// If no project specified, just test basic API access by getting user info
+		user, err := bitbucketClient.GetCurrentUser(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to validate Bitbucket access (user authentication): %w", err)
+		}
+		s.logger.Info("Bitbucket access validated successfully", "user", user.DisplayName)
 	}
 
 	return nil

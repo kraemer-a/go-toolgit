@@ -84,13 +84,13 @@ type RepositoriesResponse struct {
 }
 
 type BitbucketRepository struct {
-	ID      int64           `json:"id"`
-	Name    string          `json:"name"`
-	ScmID   string          `json:"scmId"`
-	State   string          `json:"state"`
-	Public  bool            `json:"public"`
+	ID      int64            `json:"id"`
+	Name    string           `json:"name"`
+	ScmID   string           `json:"scmId"`
+	State   string           `json:"state"`
+	Public  bool             `json:"public"`
 	Project BitbucketProject `json:"project"`
-	Links   RepositoryLinks `json:"links"`
+	Links   RepositoryLinks  `json:"links"`
 }
 
 type BitbucketProject struct {
@@ -108,6 +108,15 @@ type RepositoryLinks struct {
 type CloneLink struct {
 	Href string `json:"href"`
 	Name string `json:"name"`
+}
+
+// User represents a Bitbucket user
+type User struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	DisplayName  string `json:"displayName"`
+	EmailAddress string `json:"emailAddress"`
+	Active       bool   `json:"active"`
 }
 
 func NewClient(cfg *Config) (*Client, error) {
@@ -335,6 +344,63 @@ func (c *Client) newRequest(ctx context.Context, method, endpoint string, body i
 	req.Header.Set("Accept", "application/json")
 
 	return req, nil
+}
+
+// GetProject fetches information about a specific project
+func (c *Client) GetProject(ctx context.Context, projectKey string) (*Project, error) {
+	endpoint := fmt.Sprintf("/projects/%s", projectKey)
+
+	req, err := c.newRequest(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to get project, status: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var project Project
+	if err := json.NewDecoder(resp.Body).Decode(&project); err != nil {
+		return nil, fmt.Errorf("failed to decode project response: %w", err)
+	}
+
+	return &project, nil
+}
+
+// GetCurrentUser fetches information about the authenticated user
+func (c *Client) GetCurrentUser(ctx context.Context) (*User, error) {
+	// Bitbucket Server API endpoint for current user
+	endpoint := "/users/self"
+
+	req, err := c.newRequest(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current user: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to get current user, status: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var user User
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return nil, fmt.Errorf("failed to decode user response: %w", err)
+	}
+
+	return &user, nil
 }
 
 func (pr *PullRequest) GetHTMLURL() string {
