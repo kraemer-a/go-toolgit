@@ -1162,20 +1162,19 @@ func (f *FyneApp) displayMigrationSteps(steps []MigrationStep) {
 			stepLabel.TextStyle = fyne.TextStyle{Bold: true}
 		}
 
-		// Only show progress bar for running step
+		// Only show spinner for running step
 		if showProgressBar {
-			progressBar := widget.NewProgressBar()
-			progressBar.SetValue(float64(step.Progress) / 100.0)
+			// Create compact animated spinner with dots style
+			spinner := NewAnimatedSpinnerWithStyle(SpinnerStyleDots)
+			spinner.size = 25 // Compact size for inline display
+			spinner.Start()   // Start animation immediately
 
-			// Set compact size for progress bar
-			progressBar.Resize(fyne.NewSize(120, progressBar.MinSize().Height))
-
-			// Horizontal container with label and progress bar side by side
+			// Horizontal container with label and spinner side by side
 			stepContainer := container.New(
 				layout.NewHBoxLayout(),
 				stepLabel,
-				layout.NewSpacer(), // Push progress bar to the right
-				progressBar,
+				layout.NewSpacer(), // Push spinner to the right
+				spinner,
 			)
 			f.progressContainer.Add(stepContainer)
 		} else {
