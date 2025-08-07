@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"go-toolgit/internal/core/bitbucket"
 	"go-toolgit/internal/core/git"
@@ -82,6 +83,8 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 	ms.updateStep(&steps[2], "running", 0, "Mirror cloning from Bitbucket (all branches & tags)...")
 	var memoryRepo *git.MemoryRepository
 	if !ms.config.DryRun {
+		// Give UI time to render the spinner before starting the operation
+		time.Sleep(100 * time.Millisecond)
 		memoryRepo, err = ms.cloneFromBitbucket(ctx, bitbucketRepo)
 		if err != nil {
 			ms.updateStep(&steps[2], "failed", 0, fmt.Sprintf("Failed: %v", err))
@@ -103,6 +106,8 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 	ms.updateStep(&steps[3], "running", 0, pushMessage)
 
 	if !ms.config.DryRun && githubRepo != nil && memoryRepo != nil {
+		// Give UI time to render the spinner before starting the operation
+		time.Sleep(100 * time.Millisecond)
 		err = ms.pushToGitHub(ctx, memoryRepo, githubRepo)
 		if err != nil {
 			ms.updateStep(&steps[3], "failed", 0, fmt.Sprintf("Failed: %v", err))
@@ -161,6 +166,8 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 	// Step 7: Trigger pipeline by modifying README.md (skip in dry run)
 	ms.updateStep(&steps[6], "running", 0, "Triggering CI/CD pipeline...")
 	if !ms.config.DryRun && memoryRepo != nil && githubRepo != nil {
+		// Give UI time to render the spinner before starting the operation
+		time.Sleep(100 * time.Millisecond)
 		err = ms.triggerPipeline(ctx, memoryRepo, githubRepo)
 		if err != nil {
 			// Log warning but don't fail the entire migration
