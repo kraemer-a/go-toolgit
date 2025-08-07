@@ -226,7 +226,7 @@ func (ms *MigrationService) createGitHubTarget(ctx context.Context) (*github.Rep
 	opts := &github.CreateRepositoryOptions{
 		Name:         ms.config.TargetRepositoryName,
 		Organization: ms.config.TargetGitHubOrg,
-		Private:      true, // Default to private, can be made configurable
+		Private:      ms.config.Private,
 		Description:  fmt.Sprintf("Migrated from Bitbucket: %s", ms.config.SourceBitbucketURL),
 	}
 

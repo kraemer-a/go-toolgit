@@ -91,12 +91,13 @@ type FyneApp struct {
 	repoWidgets          []*fyne.Container
 
 	// Migration widgets
-	sourceURLEntry    *widget.Entry
-	targetOrgEntry    *widget.Entry
-	targetRepoEntry   *widget.Entry
-	webhookURLEntry   *widget.Entry
-	teamsContainer    *fyne.Container
-	progressContainer *fyne.Container
+	sourceURLEntry             *widget.Entry
+	targetOrgEntry             *widget.Entry
+	targetRepoEntry            *widget.Entry
+	repositoryVisibilitySelect *widget.Select
+	webhookURLEntry            *widget.Entry
+	teamsContainer             *fyne.Container
+	progressContainer          *fyne.Container
 
 	// Status
 	statusLabel     *widget.Label
@@ -660,6 +661,10 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 	f.targetRepoEntry = widget.NewEntry()
 	f.targetRepoEntry.SetPlaceHolder("target-repo-name")
 
+	// Repository visibility selection
+	f.repositoryVisibilitySelect = widget.NewSelect([]string{"Private", "Public"}, nil)
+	f.repositoryVisibilitySelect.SetSelected("Private") // Default to private for security
+
 	f.webhookURLEntry = widget.NewEntry()
 	f.webhookURLEntry.SetPlaceHolder("https://ci.company.com/webhook")
 
@@ -685,10 +690,11 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 
 	form := &widget.Form{
 		Items: []*widget.FormItem{
-			{Text: "Source Bitbucket URL", Widget: f.sourceURLEntry},
-			{Text: "Target GitHub Organization", Widget: f.targetOrgEntry},
-			{Text: "Target Repository Name", Widget: f.targetRepoEntry},
-			{Text: "Webhook URL (optional)", Widget: f.webhookURLEntry},
+			{Text: "Source Bitbucket URL", Widget: f.sourceURLEntry, HintText: "Bitbucket repository URL to migrate from"},
+			{Text: "Target GitHub Organization", Widget: f.targetOrgEntry, HintText: "GitHub organization for the new repository"},
+			{Text: "Target Repository Name", Widget: f.targetRepoEntry, HintText: "Name for the new GitHub repository"},
+			{Text: "Repository Visibility", Widget: f.repositoryVisibilitySelect, HintText: "Private repositories are only visible to you and specified teams"},
+			{Text: "Webhook URL (optional)", Widget: f.webhookURLEntry, HintText: "URL to trigger after successful migration"},
 		},
 	}
 
@@ -891,6 +897,7 @@ func (f *FyneApp) handleSaveMigrationConfig() {
 	configData.MigrationTargetRepo = migrationConfig.TargetRepositoryName
 	configData.MigrationWebhookURL = migrationConfig.WebhookURL
 	configData.MigrationTeams = migrationConfig.Teams
+	configData.MigrationPrivate = migrationConfig.Private
 
 	// Debug: Log what we're about to save
 	f.logger.Info("Saving migration config",
@@ -1107,6 +1114,7 @@ func (f *FyneApp) collectMigrationConfig() MigrationConfig {
 		TargetRepositoryName: f.targetRepoEntry.Text,
 		WebhookURL:           f.webhookURLEntry.Text,
 		Teams:                teams,
+		Private:              f.repositoryVisibilitySelect.Selected == "Private",
 	}
 }
 
@@ -2436,6 +2444,15 @@ func (f *FyneApp) loadConfigurationFromFile() {
 	f.targetOrgEntry.SetText(configData.MigrationTargetOrg)
 	f.targetRepoEntry.SetText(configData.MigrationTargetRepo)
 	f.webhookURLEntry.SetText(configData.MigrationWebhookURL)
+
+	// Set repository visibility based on loaded configuration
+	// Default to Private if MigrationPrivate is not explicitly set to false
+	if configData.MigrationPrivate || (configData.MigrationSourceURL == "" && configData.MigrationTargetOrg == "") {
+		// Default to Private for new configurations or when explicitly set to private
+		f.repositoryVisibilitySelect.SetSelected("Private")
+	} else {
+		f.repositoryVisibilitySelect.SetSelected("Public")
+	}
 
 	// Prefill migration teams (always clear and reload to sync with config)
 	f.teamsContainer.RemoveAll()
