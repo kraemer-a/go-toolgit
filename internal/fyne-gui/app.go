@@ -688,9 +688,8 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 	// Progress area with compact layout
 	f.progressContainer = container.New(layout.NewVBoxLayout())
 
-	// Create scrollable progress area with fixed height
+	// Create scrollable progress area without fixed height constraint
 	progressScroll := container.NewScroll(f.progressContainer)
-	progressScroll.SetMinSize(fyne.NewSize(0, 150)) // Fixed height of 150px
 
 	form := &widget.Form{
 		Items: []*widget.FormItem{
@@ -715,11 +714,17 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 
 	progressCard := widget.NewCard("Migration Progress", "Real-time migration status", progressScroll)
 
-	return container.New(
+	// Use BorderLayout to maximize progress area
+	topContent := container.New(
 		layout.NewVBoxLayout(),
 		widget.NewCard("Repository Migration", "Migrate from Bitbucket Server to GitHub", form),
 		teamsCard,
 		buttonsContainer,
+	)
+
+	return container.New(
+		layout.NewBorderLayout(topContent, nil, nil, nil),
+		topContent,
 		progressCard,
 	)
 }
@@ -1133,7 +1138,7 @@ func (f *FyneApp) displayMigrationSteps(steps []MigrationStep) {
 		switch step.Status {
 		case "completed":
 			statusIcon = "✅"
-			importance = widget.LowImportance
+			importance = widget.SuccessImportance // Changed from LowImportance for better visibility
 		case "failed":
 			statusIcon = "❌"
 			importance = widget.DangerImportance
