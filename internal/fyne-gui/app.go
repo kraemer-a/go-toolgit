@@ -1167,10 +1167,14 @@ func (f *FyneApp) displayMigrationSteps(steps []MigrationStep) {
 			progressBar := widget.NewProgressBar()
 			progressBar.SetValue(float64(step.Progress) / 100.0)
 
-			// Compact container with label and progress bar
+			// Set compact size for progress bar
+			progressBar.Resize(fyne.NewSize(120, progressBar.MinSize().Height))
+
+			// Horizontal container with label and progress bar side by side
 			stepContainer := container.New(
-				layout.NewVBoxLayout(),
+				layout.NewHBoxLayout(),
 				stepLabel,
+				layout.NewSpacer(), // Push progress bar to the right
 				progressBar,
 			)
 			f.progressContainer.Add(stepContainer)
