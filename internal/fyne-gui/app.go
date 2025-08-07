@@ -1048,7 +1048,10 @@ func (f *FyneApp) handleStartMigration() {
 		})
 
 		if result.Success {
-			f.setStatusSuccess(fmt.Sprintf("Migration completed! Repository: %s", result.GitHubRepoURL))
+			f.setStatusSuccess("Migration completed successfully!")
+			fyne.Do(func() {
+				f.showMigrationResultsDialog(result)
+			})
 		} else {
 			f.setStatusError(fmt.Sprintf("Migration failed: %s", result.Message))
 		}
@@ -2310,6 +2313,56 @@ func (f *FyneApp) showResultsDialog(result *ProcessingResult) {
 
 	resultsWindow.SetContent(mainContent)
 	resultsWindow.Show()
+}
+
+func (f *FyneApp) showMigrationResultsDialog(result *MigrationResult) {
+	// Create migration results window
+	resultsWindow := f.app.NewWindow("Migration Complete")
+	resultsWindow.Resize(fyne.NewSize(600, 400))
+	resultsWindow.CenterOnScreen()
+
+	// Success message
+	successLabel := widget.NewLabel("✅ Repository migration completed successfully!")
+	successLabel.TextStyle = fyne.TextStyle{Bold: true}
+	successLabel.Alignment = fyne.TextAlignCenter
+
+	// Repository URL (display only)
+	repoURLLabel := widget.NewLabel(fmt.Sprintf("New GitHub Repository: %s", result.GitHubRepoURL))
+	repoURLLabel.Wrapping = fyne.TextWrapWord
+	repoURLLabel.Alignment = fyne.TextAlignCenter
+
+	// Open Repository button
+	openRepoBtn := widget.NewButtonWithIcon("Open Repository", theme.ComputerIcon(), func() {
+		f.openURL(result.GitHubRepoURL)
+	})
+	openRepoBtn.Importance = widget.HighImportance
+
+	// Close button
+	closeBtn := widget.NewButton("Close", func() {
+		resultsWindow.Close()
+	})
+	closeBtn.Importance = widget.MediumImportance
+
+	// Buttons container
+	buttonsContainer := container.New(
+		layout.NewHBoxLayout(),
+		layout.NewSpacer(),
+		closeBtn,
+		openRepoBtn,
+	)
+
+	// Main content
+	mainContent := container.New(
+		layout.NewVBoxLayout(),
+		container.NewPadded(successLabel),
+		container.NewPadded(repoURLLabel),
+		widget.NewSeparator(),
+		container.NewPadded(buttonsContainer),
+	)
+
+	resultsWindow.SetContent(mainContent)
+	resultsWindow.Show()
+	resultsWindow.RequestFocus()
 }
 
 // loadConfigurationFromFile loads configuration from ./config.yaml and prefills the GUI
