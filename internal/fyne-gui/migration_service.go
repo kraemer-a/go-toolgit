@@ -234,19 +234,18 @@ func (ms *MigrationService) cloneFromBitbucket(ctx context.Context, bitbucketRep
 		return nil, fmt.Errorf("failed to convert SSH URL to HTTPS: %w", err)
 	}
 
-	// Create Bitbucket-specific git operations with proper credentials
+	// Validate Bitbucket credentials
 	if ms.bitbucketUsername == "" || ms.bitbucketPassword == "" {
 		return nil, fmt.Errorf("Bitbucket credentials not configured - username and password required for authentication")
 	}
 
-	// Create token in the format expected by git operations (username:password for basic auth)
-	bitbucketAuth := fmt.Sprintf("%s:%s", ms.bitbucketUsername, ms.bitbucketPassword)
-	bitbucketGitOps := git.NewMemoryOperations(bitbucketAuth)
+	// Create git operations instance (token not used for basic auth)
+	bitbucketGitOps := git.NewMemoryOperations("")
 
-	// Clone using Bitbucket-authenticated git operations
-	memoryRepo, err := bitbucketGitOps.CloneRepository(ctx, httpsURL, bitbucketRepo.FullName)
+	// Clone using Bitbucket basic authentication
+	memoryRepo, err := bitbucketGitOps.CloneRepositoryWithBasicAuth(ctx, httpsURL, bitbucketRepo.FullName, ms.bitbucketUsername, ms.bitbucketPassword)
 	if err != nil {
-		return nil, fmt.Errorf("failed to clone repository %s: %w", bitbucketRepo.FullName, err)
+		return nil, fmt.Errorf("failed to clone repository %s with basic auth: %w", bitbucketRepo.FullName, err)
 	}
 
 	return memoryRepo, nil

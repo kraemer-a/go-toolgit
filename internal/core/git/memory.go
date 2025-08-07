@@ -62,7 +62,7 @@ func NewMemoryOperations(token string) *MemoryOperations {
 // CloneRepository clones a repository into memory
 func (m *MemoryOperations) CloneRepository(ctx context.Context, repoURL, fullName string) (*MemoryRepository, error) {
 	startTime := time.Now()
-	
+
 	storage := memory.NewStorage()
 	fs := memfs.New()
 
@@ -81,6 +81,38 @@ func (m *MemoryOperations) CloneRepository(ctx context.Context, repoURL, fullNam
 
 	cloneDuration := time.Since(startTime)
 	log.Printf("[INFO] Successfully cloned repository %s in %v", fullName, cloneDuration)
+
+	return &MemoryRepository{
+		repo:     repo,
+		fs:       fs,
+		auth:     auth,
+		repoURL:  repoURL,
+		fullName: fullName,
+	}, nil
+}
+
+// CloneRepositoryWithBasicAuth clones a repository using username/password authentication (for Bitbucket)
+func (m *MemoryOperations) CloneRepositoryWithBasicAuth(ctx context.Context, repoURL, fullName, username, password string) (*MemoryRepository, error) {
+	startTime := time.Now()
+
+	storage := memory.NewStorage()
+	fs := memfs.New()
+
+	auth := &http.BasicAuth{
+		Username: username, // Bitbucket username
+		Password: password, // Bitbucket password/app password
+	}
+
+	repo, err := git.Clone(storage, fs, &git.CloneOptions{
+		URL:  repoURL,
+		Auth: auth,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to clone repository %s: %w", fullName, err)
+	}
+
+	cloneDuration := time.Since(startTime)
+	log.Printf("[INFO] Successfully cloned repository %s using basic auth in %v", fullName, cloneDuration)
 
 	return &MemoryRepository{
 		repo:     repo,

@@ -290,11 +290,11 @@ func (s *Service) InitializeServiceConfig(configData ConfigData) error {
 		s.config.Bitbucket.Username = configData.Username
 		s.config.Bitbucket.Password = configData.Password
 		s.config.Bitbucket.Project = configData.Project
-		// Clear GitHub fields when using Bitbucket
-		s.config.GitHub.BaseURL = ""
-		s.config.GitHub.Token = ""
-		s.config.GitHub.Org = ""
-		s.config.GitHub.Team = ""
+		// Preserve GitHub fields for migration support (don't clear them)
+		s.config.GitHub.BaseURL = configData.GitHubURL
+		s.config.GitHub.Token = configData.Token
+		s.config.GitHub.Org = configData.Organization
+		s.config.GitHub.Team = configData.Team
 	}
 
 	// Update processing patterns (allow empty to enable clearing)
@@ -306,8 +306,13 @@ func (s *Service) InitializeServiceConfig(configData ConfigData) error {
 	s.config.PullRequest.BodyTemplate = configData.PRBodyTemplate
 	s.config.PullRequest.BranchPrefix = configData.BranchPrefix
 
-	// Initialize GitHub client only if using GitHub provider
+	// Initialize GitHub client for GitHub provider (required) or Bitbucket provider (optional, for migration)
 	if configData.Provider == "github" {
+		// GitHub provider requires GitHub client
+		if s.config.GitHub.BaseURL == "" || s.config.GitHub.Token == "" {
+			return fmt.Errorf("GitHub provider requires base URL and token")
+		}
+
 		// Create GitHub client config
 		githubConfig := &github.Config{
 			BaseURL:      s.config.GitHub.BaseURL,
@@ -326,11 +331,38 @@ func (s *Service) InitializeServiceConfig(configData ConfigData) error {
 
 		// Initialize git memory operations with GitHub token
 		s.gitOps = git.NewMemoryOperations(configData.Token)
+	} else if configData.Provider == "bitbucket" {
+		// Bitbucket provider: Create GitHub client for migration if credentials are available
+		if configData.GitHubURL != "" && configData.Token != "" {
+			// Create GitHub client for migration support using configData
+			githubConfig := &github.Config{
+				BaseURL:      configData.GitHubURL,
+				Token:        configData.Token,
+				Timeout:      s.config.GitHub.Timeout,
+				MaxRetries:   s.config.GitHub.MaxRetries,
+				WaitForReset: s.config.GitHub.WaitForRateLimit,
+			}
+
+			// Initialize GitHub client for migration
+			var err error
+			s.githubClient, err = github.NewClient(githubConfig)
+			if err != nil {
+				s.logger.Warn("Could not create GitHub client for migration support", "error", err)
+				s.githubClient = nil
+			} else {
+				s.logger.Info("GitHub client created for migration support")
+			}
+		} else {
+			// No GitHub credentials available - migration won't work but basic Bitbucket operations will
+			s.logger.Info("No GitHub credentials provided - migration will not be available")
+			s.githubClient = nil
+		}
+
+		// For Bitbucket, git operations will be initialized when needed for specific operations
+		s.gitOps = nil
 	} else {
-		// Clear GitHub client when using Bitbucket
+		// Unknown provider
 		s.githubClient = nil
-		// For Bitbucket, we don't initialize git operations here as they're provider-agnostic
-		// Git operations will be initialized with appropriate credentials when needed
 		s.gitOps = nil
 	}
 
@@ -599,17 +631,22 @@ func (s *Service) ValidateMigrationConfig(config MigrationConfig) error {
 		return fmt.Errorf("target repository name is required")
 	}
 
-	// Validate GitHub access
+	// Validate GitHub access for migration target
 	if s.githubClient == nil {
-		return fmt.Errorf("GitHub client not initialized")
+		return fmt.Errorf("GitHub client not initialized - migration requires GitHub credentials in the Configuration tab")
 	}
 
-	// For now, just validate basic access - a full implementation would check org access
+	// Validate GitHub token has necessary permissions
 	ctx := context.Background()
 	err := s.githubClient.ValidateTokenAccess(ctx)
 	if err != nil {
-		return fmt.Errorf("cannot access GitHub with current token: %w", err)
+		return fmt.Errorf("cannot access GitHub with current token (migration target): %w", err)
 	}
+
+	s.logger.Info("Migration configuration validated successfully",
+		"source", config.SourceBitbucketURL,
+		"target_org", config.TargetGitHubOrg,
+		"target_repo", config.TargetRepositoryName)
 
 	return nil
 }
