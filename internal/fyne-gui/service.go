@@ -686,7 +686,7 @@ func (s *Service) MigrateRepositoryWithCallback(config MigrationConfig, liveProg
 		}
 	}
 
-	migrationService := NewMigrationService(s.githubClient, s.gitOps, &config, s.config.GitHub.Token, progressCallback)
+	migrationService := NewMigrationService(s.githubClient, s.gitOps, &config, s.config.GitHub.Token, s.config.GitHub.BaseURL, progressCallback)
 
 	// Always set Bitbucket credentials if available, even if client creation failed
 	// This allows the migration to work with credentials directly for git operations

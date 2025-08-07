@@ -18,18 +18,20 @@ type MigrationService struct {
 	gitOps            *git.MemoryOperations
 	config            *MigrationConfig
 	githubToken       string
+	githubBaseURL     string
 	bitbucketUsername string
 	bitbucketPassword string
 	progressCallback  func(step MigrationStep)
 }
 
 // NewMigrationService creates a new migration service
-func NewMigrationService(githubClient *github.Client, gitOps *git.MemoryOperations, config *MigrationConfig, githubToken string, progressCallback func(step MigrationStep)) *MigrationService {
+func NewMigrationService(githubClient *github.Client, gitOps *git.MemoryOperations, config *MigrationConfig, githubToken string, githubBaseURL string, progressCallback func(step MigrationStep)) *MigrationService {
 	return &MigrationService{
 		githubClient:     githubClient,
 		gitOps:           gitOps,
 		config:           config,
 		githubToken:      githubToken,
+		githubBaseURL:    githubBaseURL,
 		progressCallback: progressCallback,
 	}
 }
@@ -143,7 +145,8 @@ func (ms *MigrationService) MigrateRepositoryImpl(ctx context.Context) (*Migrati
 	} else {
 		result.Message = "Migration completed successfully"
 		if githubRepo != nil {
-			result.GitHubRepoURL = fmt.Sprintf("https://github.com/%s", githubRepo.FullName)
+			webURL := ms.convertAPIToWebURL(ms.githubBaseURL)
+			result.GitHubRepoURL = fmt.Sprintf("%s/%s", webURL, githubRepo.FullName)
 		}
 	}
 
@@ -354,4 +357,37 @@ func (ms *MigrationService) convertSSHToHTTPS(sshURL string) (string, error) {
 
 	// If it's already HTTPS or another format, return as-is
 	return sshURL, nil
+}
+
+// convertAPIToWebURL converts GitHub API URL to web URL for browser access
+func (ms *MigrationService) convertAPIToWebURL(apiURL string) string {
+	if apiURL == "" || apiURL == "https://api.github.com" {
+		// Default public GitHub
+		return "https://github.com"
+	}
+
+	// Parse the API URL
+	parsedURL, err := url.Parse(apiURL)
+	if err != nil {
+		// Fallback to public GitHub if parsing fails
+		return "https://github.com"
+	}
+
+	// For enterprise GitHub, remove API path components
+	host := parsedURL.Host
+	scheme := parsedURL.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+
+	// Common enterprise GitHub API patterns:
+	// https://github.company.com/api/v3 -> https://github.company.com
+	// https://api.github.company.com -> https://github.company.com (remove api. prefix)
+
+	// Remove 'api.' prefix if present
+	if strings.HasPrefix(host, "api.") {
+		host = strings.TrimPrefix(host, "api.")
+	}
+
+	return fmt.Sprintf("%s://%s", scheme, host)
 }
