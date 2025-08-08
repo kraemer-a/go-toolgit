@@ -672,6 +672,48 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 	f.webhookURLEntry = widget.NewEntry()
 	f.webhookURLEntry.SetPlaceHolder("https://ci.company.com/webhook")
 
+	// Create webhook URLs with copy buttons
+	type webhookURLInfo struct {
+		label string
+		url   string
+	}
+
+	webhookURLs := []webhookURLInfo{
+		{"Operatoren", "https://leistung-mgmt.con.idst.ibaintern.de/build/tp/tekton?pipeline=golang-operator-pipeline"},
+		{"RPMs", "https://leistung-mgmt.con.idst.ibaintern.de/build/tp/tekton?pipeline=build-rpm-package-github"},
+		{"Images", "https://leistung-mgmt.con.idst.ibaintern.de/build/tp/tekton?pipeline=build-image-and-push"},
+		{"Quarkus-Services", "https://leistung-mgmt.con.idst.ibaintern.de/build/tp/tekton?pipeline=github-pipeline"},
+	}
+
+	// Create container for URLs with copy buttons
+	urlsContainer := container.New(layout.NewVBoxLayout())
+	for _, urlInfo := range webhookURLs {
+		// Capture URL in closure
+		urlCopy := urlInfo.url
+		labelText := urlInfo.label
+
+		// Create label with description and URL
+		label := widget.NewLabel(fmt.Sprintf("%s:\n%s", labelText, urlCopy))
+		label.TextStyle = fyne.TextStyle{Monospace: true}
+		label.Wrapping = fyne.TextWrapBreak
+
+		// Create copy button
+		copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+			fyne.CurrentApp().Clipboard().SetContent(urlCopy)
+			// The URL is now in the clipboard
+		})
+		copyBtn.Importance = widget.LowImportance
+
+		// Create row with label and copy button
+		row := container.New(layout.NewBorderLayout(nil, nil, nil, copyBtn), label, copyBtn)
+		urlsContainer.Add(row)
+	}
+
+	// Create foldable accordion for webhook URLs
+	webhookAccordion := widget.NewAccordion(
+		widget.NewAccordionItem("Tekton EventListener URLs", urlsContainer),
+	)
+
 	// Teams management
 	f.teamsContainer = container.New(layout.NewVBoxLayout())
 	addTeamBtn := widget.NewButton("Add Team", f.handleAddTeam)
@@ -706,6 +748,8 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 		},
 	}
 
+	// Webhook help text is now in the accordion above
+
 	teamsCard := widget.NewCard("Team Permissions", "Assign GitHub teams to the repository",
 		container.New(layout.NewVBoxLayout(), f.teamsContainer, addTeamBtn))
 
@@ -723,6 +767,7 @@ func (f *FyneApp) createMigrationTab() *fyne.Container {
 	topContent := container.New(
 		layout.NewVBoxLayout(),
 		widget.NewCard("Repository Migration", "Migrate from Bitbucket Server to GitHub", form),
+		webhookAccordion,
 		teamsCard,
 		buttonsContainer,
 	)
