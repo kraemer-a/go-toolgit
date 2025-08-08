@@ -135,12 +135,12 @@ func (m *MemoryOperations) CloneRepositoryWithMirror(ctx context.Context, repoUR
 		Password: password, // Bitbucket password/app password
 	}
 
-	// Clone the default branch first
+	// Clone with working directory to ensure file contents are loaded properly
 	repo, err := git.Clone(storage, fs, &git.CloneOptions{
 		URL:          repoURL,
 		Auth:         auth,
 		SingleBranch: false,
-		NoCheckout:   true, // We don't need a working directory
+		NoCheckout:   false, // CHANGED: Create working directory to load file contents
 		Tags:         git.AllTags,
 	})
 	if err != nil {
