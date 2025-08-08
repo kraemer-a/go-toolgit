@@ -27,6 +27,17 @@ type AdwaitaVariantTheme struct {
 
 // Color forces the specific variant instead of using the system default
 func (a *AdwaitaVariantTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color {
+	// Override selection color for better visibility
+	if name == theme.ColorNameSelection {
+		if a.variant == theme.VariantDark {
+			// Bright blue with full opacity for dark mode - much more visible
+			return color.RGBA{R: 64, G: 156, B: 255, A: 255}
+		} else {
+			// Cornflower blue with high opacity for light mode - good contrast
+			return color.RGBA{R: 100, G: 149, B: 237, A: 180}
+		}
+	}
+	// Delegate all other colors to base Adwaita theme
 	return a.baseTheme.Color(name, a.variant)
 }
 
