@@ -123,12 +123,11 @@ func (m *MemoryOperations) CloneRepositoryWithBasicAuth(ctx context.Context, rep
 	}, nil
 }
 
-// CloneRepositoryWithMirror clones a repository as a mirror (all branches, tags, refs) using basic auth
+// CloneRepositoryWithMirror clones a repository with all branches and tags using basic auth
 func (m *MemoryOperations) CloneRepositoryWithMirror(ctx context.Context, repoURL, fullName, username, password string) (*MemoryRepository, error) {
 	startTime := time.Now()
 
 	storage := memory.NewStorage()
-	// For mirror clone, we don't need a filesystem since it's a bare repository
 	fs := memfs.New()
 
 	auth := &http.BasicAuth{
@@ -136,18 +135,96 @@ func (m *MemoryOperations) CloneRepositoryWithMirror(ctx context.Context, repoUR
 		Password: password, // Bitbucket password/app password
 	}
 
+	// Clone the default branch first
 	repo, err := git.Clone(storage, fs, &git.CloneOptions{
-		URL:        repoURL,
-		Auth:       auth,
-		Mirror:     true, // Mirror clone - gets all references
-		NoCheckout: true, // Bare repository - no working directory
+		URL:          repoURL,
+		Auth:         auth,
+		SingleBranch: false,
+		NoCheckout:   true, // We don't need a working directory
+		Tags:         git.AllTags,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to mirror clone repository %s: %w", fullName, err)
+		return nil, fmt.Errorf("failed to clone repository %s: %w", fullName, err)
 	}
 
+	// Fetch all remote branches to ensure we have everything
+	err = repo.Fetch(&git.FetchOptions{
+		Auth: auth,
+		RefSpecs: []config.RefSpec{
+			"refs/heads/*:refs/remotes/origin/*",
+			"refs/tags/*:refs/tags/*",
+		},
+		Tags: git.AllTags,
+	})
+	if err != nil && err != git.NoErrAlreadyUpToDate {
+		log.Printf("[WARN] Failed to fetch additional refs for %s: %v", fullName, err)
+	}
+
+	// Convert remote branches to local branches
+	refs, err := repo.References()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get references: %w", err)
+	}
+
+	remoteBranchCount := 0
+	localBranchCount := 0
+
+	err = refs.ForEach(func(ref *plumbing.Reference) error {
+		refStr := ref.Name().String()
+		log.Printf("[DEBUG] Found reference: %s (hash: %s)", refStr, ref.Hash().String()[:8])
+
+		if ref.Name().IsRemote() {
+			remoteBranchCount++
+			if strings.HasPrefix(refStr, "refs/remotes/origin/") && !strings.HasSuffix(refStr, "/HEAD") {
+				branchName := strings.TrimPrefix(refStr, "refs/remotes/origin/")
+
+				// Check if local branch already exists and compare hashes
+				existingRef, err := repo.Reference(plumbing.NewBranchReferenceName(branchName), true)
+				if err == nil {
+					log.Printf("[DEBUG] Local branch %s already exists (hash: %s), remote hash: %s", branchName, existingRef.Hash().String()[:8], ref.Hash().String()[:8])
+					if existingRef.Hash() != ref.Hash() {
+						log.Printf("[WARN] Local and remote %s have different commits! Updating local to match remote.", branchName)
+					}
+				}
+
+				localRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName(branchName), ref.Hash())
+				err = repo.Storer.SetReference(localRef)
+				if err != nil {
+					log.Printf("[WARN] Failed to create local branch %s: %v", branchName, err)
+				} else {
+					log.Printf("[INFO] Created/updated local branch %s from remote %s (hash: %s)", branchName, refStr, ref.Hash().String()[:8])
+					localBranchCount++
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert remote branches: %w", err)
+	}
+
+	log.Printf("[INFO] Found %d remote branches, created %d local branches", remoteBranchCount, localBranchCount)
+
+	// Verify local branches were created by listing all references again
+	allRefs, err := repo.References()
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify references: %w", err)
+	}
+
+	finalBranchCount := 0
+	allRefs.ForEach(func(ref *plumbing.Reference) error {
+		refStr := ref.Name().String()
+		if ref.Name().IsBranch() {
+			finalBranchCount++
+			log.Printf("[DEBUG] Final local branch: %s (hash: %s)", refStr, ref.Hash().String()[:8])
+		}
+		return nil
+	})
+
+	log.Printf("[INFO] Repository has %d local branches after conversion", finalBranchCount)
+
 	cloneDuration := time.Since(startTime)
-	log.Printf("[INFO] Successfully mirror cloned repository %s using basic auth in %v", fullName, cloneDuration)
+	log.Printf("[INFO] Successfully cloned repository %s with all branches in %v", fullName, cloneDuration)
 
 	return &MemoryRepository{
 		repo:     repo,
@@ -404,39 +481,56 @@ func (mr *MemoryRepository) PushAllReferencesToRemoteWithOptions(ctx context.Con
 	var refSpecs []config.RefSpec
 	var masterTransformed bool
 
-	err = refs.ForEach(func(ref *plumbing.Reference) error {
+	// Check if a master branch exists
+	hasMasterBranch := false
+	refs.ForEach(func(ref *plumbing.Reference) error {
+		if ref.Name().String() == "refs/heads/master" {
+			hasMasterBranch = true
+		}
+		return nil
+	})
+
+	// Create a fresh references iterator for the actual push operation
+	pushRefs, err := mr.repo.References()
+	if err != nil {
+		return fmt.Errorf("failed to get references for push: %w", err)
+	}
+
+	err = pushRefs.ForEach(func(ref *plumbing.Reference) error {
 		refName := ref.Name()
 
 		// Handle branches, tags, and notes
-		if refName.IsBranch() || refName.IsTag() || refName.IsNote() {
+		if refName.IsBranch() {
+			branchName := strings.TrimPrefix(refName.String(), "refs/heads/")
+
 			// Handle master→main transformation for branches
-			if refName.IsBranch() && transformMasterToMain && refName.String() == "refs/heads/master" {
+			if transformMasterToMain && branchName == "master" {
 				// Transform master branch to main
 				targetRef := "refs/heads/main"
 				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(targetRef))
 				refSpecs = append(refSpecs, refSpec)
 				masterTransformed = true
-				log.Printf("[INFO] Transforming master branch to main during migration")
+				log.Printf("[INFO] Transforming branch master to main during migration")
+			} else if transformMasterToMain && branchName == "main" && hasMasterBranch {
+				// Only skip existing main branch if we actually have a master to transform
+				log.Printf("[INFO] Skipping existing main branch (master→main transformation will replace it)")
+				return nil
 			} else {
-				// Direct mapping for all other branches, tags, and notes
+				// Direct mapping for other branches (including main when no master exists)
 				refSpec := config.RefSpec(refName + ":" + refName)
 				refSpecs = append(refSpecs, refSpec)
+				log.Printf("[INFO] Pushing branch %s", branchName)
+			}
+		} else if refName.IsTag() || refName.IsNote() {
+			// Direct mapping for tags and notes
+			refSpec := config.RefSpec(refName + ":" + refName)
+			refSpecs = append(refSpecs, refSpec)
+			if refName.IsTag() {
+				log.Printf("[INFO] Pushing tag %s", strings.TrimPrefix(refName.String(), "refs/tags/"))
 			}
 		} else if refName.IsRemote() {
-			// Map remote refs to local branches (refs/remotes/origin/branch -> refs/heads/branch)
-			refStr := refName.String()
-			if strings.HasPrefix(refStr, "refs/remotes/origin/") {
-				localBranch := strings.Replace(refStr, "refs/remotes/origin/", "refs/heads/", 1)
-
-				// Skip remote master refs when transformation is enabled to avoid conflicts
-				if transformMasterToMain && localBranch == "refs/heads/master" {
-					log.Printf("[INFO] Skipping remote master ref during migration (local master→main transformation)")
-					return nil // Skip this reference entirely
-				}
-
-				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(localBranch))
-				refSpecs = append(refSpecs, refSpec)
-			}
+			// Skip remote refs - we should have local branches now
+			return nil
 		}
 		return nil
 	})
@@ -511,39 +605,73 @@ func (mr *MemoryRepository) PushAllReferencesToRemoteWithResult(ctx context.Cont
 	var refSpecs []config.RefSpec
 	var masterTransformed bool
 
-	err = refs.ForEach(func(ref *plumbing.Reference) error {
+	// Check if a master branch exists and debug all references
+	hasMasterBranch := false
+	branchCount := 0
+	tagCount := 0
+	remoteCount := 0
+
+	refs.ForEach(func(ref *plumbing.Reference) error {
+		refStr := ref.Name().String()
+		log.Printf("[DEBUG] Push: Found reference: %s", refStr)
+
+		if ref.Name().String() == "refs/heads/master" {
+			hasMasterBranch = true
+		}
+		if ref.Name().IsBranch() {
+			branchCount++
+		} else if ref.Name().IsTag() {
+			tagCount++
+		} else if ref.Name().IsRemote() {
+			remoteCount++
+		}
+		return nil
+	})
+
+	log.Printf("[INFO] Push: Found %d branches, %d tags, %d remotes. Master branch exists: %t", branchCount, tagCount, remoteCount, hasMasterBranch)
+
+	// Create a fresh references iterator for the actual push operation
+	pushRefs, err := mr.repo.References()
+	if err != nil {
+		result.Error = fmt.Errorf("failed to get references for push: %w", err)
+		return result
+	}
+
+	err = pushRefs.ForEach(func(ref *plumbing.Reference) error {
 		refName := ref.Name()
 
 		// Handle branches, tags, and notes
-		if refName.IsBranch() || refName.IsTag() || refName.IsNote() {
+		if refName.IsBranch() {
+			branchName := strings.TrimPrefix(refName.String(), "refs/heads/")
+
 			// Handle master→main transformation for branches
-			if refName.IsBranch() && transformMasterToMain && refName.String() == "refs/heads/master" {
+			if transformMasterToMain && branchName == "master" {
 				// Transform master branch to main
 				targetRef := "refs/heads/main"
 				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(targetRef))
 				refSpecs = append(refSpecs, refSpec)
 				masterTransformed = true
-				log.Printf("[INFO] Transforming master branch to main during migration")
+				log.Printf("[INFO] Transforming branch master to main during push")
+			} else if transformMasterToMain && branchName == "main" && hasMasterBranch {
+				// Only skip existing main branch if we actually have a master to transform
+				log.Printf("[INFO] Skipping existing main branch (master→main transformation will replace it)")
+				return nil
 			} else {
-				// Direct mapping for all other branches, tags, and notes
+				// Direct mapping for other branches (including main when no master exists)
 				refSpec := config.RefSpec(refName + ":" + refName)
 				refSpecs = append(refSpecs, refSpec)
+				log.Printf("[INFO] Pushing branch %s", branchName)
+			}
+		} else if refName.IsTag() || refName.IsNote() {
+			// Direct mapping for tags and notes
+			refSpec := config.RefSpec(refName + ":" + refName)
+			refSpecs = append(refSpecs, refSpec)
+			if refName.IsTag() {
+				log.Printf("[INFO] Pushing tag %s", strings.TrimPrefix(refName.String(), "refs/tags/"))
 			}
 		} else if refName.IsRemote() {
-			// Map remote refs to local branches (refs/remotes/origin/branch -> refs/heads/branch)
-			refStr := refName.String()
-			if strings.HasPrefix(refStr, "refs/remotes/origin/") {
-				localBranch := strings.Replace(refStr, "refs/remotes/origin/", "refs/heads/", 1)
-
-				// Skip remote master refs when transformation is enabled to avoid conflicts
-				if transformMasterToMain && localBranch == "refs/heads/master" {
-					log.Printf("[INFO] Skipping remote master ref during migration (local master→main transformation)")
-					return nil // Skip this reference entirely
-				}
-
-				refSpec := config.RefSpec(refName + ":" + plumbing.ReferenceName(localBranch))
-				refSpecs = append(refSpecs, refSpec)
-			}
+			// Skip remote refs - we should have local branches now
+			return nil
 		}
 		return nil
 	})

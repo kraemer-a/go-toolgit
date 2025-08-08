@@ -101,12 +101,12 @@ func (c *Client) GetTeam(ctx context.Context, org, teamSlug string) (*Team, erro
 	if err := c.rateLimiter.CheckRateLimit(ctx, false); err != nil {
 		return nil, fmt.Errorf("rate limit check failed: %w", err)
 	}
-	
+
 	team, resp, err := c.client.Teams.GetTeamBySlug(ctx, org, teamSlug)
-	
+
 	// Update rate limit info from response
 	c.rateLimiter.UpdateFromResponse(resp, false)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get team: %w", err)
 	}
@@ -134,12 +134,12 @@ func (c *Client) ListTeamRepositories(ctx context.Context, team *Team) ([]*Repos
 		if err := c.rateLimiter.CheckRateLimit(ctx, false); err != nil {
 			return nil, fmt.Errorf("rate limit check failed: %w", err)
 		}
-		
+
 		repos, resp, err := c.client.Teams.ListTeamReposByID(ctx, team.OrgID, team.ID, opt)
-		
+
 		// Update rate limit info from response
 		c.rateLimiter.UpdateFromResponse(resp, false)
-		
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to list team repositories: %w", err)
 		}
@@ -169,7 +169,7 @@ func (c *Client) CreatePullRequest(ctx context.Context, owner, repo string, pr *
 	if err := c.rateLimiter.CheckRateLimit(ctx, false); err != nil {
 		return nil, fmt.Errorf("rate limit check failed: %w", err)
 	}
-	
+
 	newPR := &github.NewPullRequest{
 		Title: &pr.Title,
 		Head:  &pr.Head,
@@ -178,10 +178,10 @@ func (c *Client) CreatePullRequest(ctx context.Context, owner, repo string, pr *
 	}
 
 	pullRequest, resp, err := c.client.PullRequests.Create(ctx, owner, repo, newPR)
-	
+
 	// Update rate limit info from response
 	c.rateLimiter.UpdateFromResponse(resp, false)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pull request: %w", err)
 	}
@@ -197,22 +197,22 @@ type PullRequestOptions struct {
 }
 
 type SearchOptions struct {
-	Query        string   // GitHub search query
-	Owner        string   // Repository owner (user or organization)
-	Language     string   // Programming language
-	Stars        string   // Star count (e.g., ">100", "50..100")
-	Size         string   // Repository size in KB
-	Fork         bool     // Include forks
-	Archived     bool     // Include archived repositories
-	Sort         string   // Sort by: stars, forks, updated
-	Order        string   // Sort order: asc, desc
-	PerPage      int      // Results per page (max 100)
-	MaxResults   int      // Maximum total results
+	Query      string // GitHub search query
+	Owner      string // Repository owner (user or organization)
+	Language   string // Programming language
+	Stars      string // Star count (e.g., ">100", "50..100")
+	Size       string // Repository size in KB
+	Fork       bool   // Include forks
+	Archived   bool   // Include archived repositories
+	Sort       string // Sort by: stars, forks, updated
+	Order      string // Sort order: asc, desc
+	PerPage    int    // Results per page (max 100)
+	MaxResults int    // Maximum total results
 }
 
 func (c *Client) SearchRepositories(ctx context.Context, opts SearchOptions) ([]*Repository, error) {
 	query := buildSearchQuery(opts)
-	
+
 	searchOpts := &github.SearchOptions{
 		Sort:  opts.Sort,
 		Order: opts.Order,
@@ -234,18 +234,18 @@ func (c *Client) SearchRepositories(ctx context.Context, opts SearchOptions) ([]
 	}
 
 	var allRepos []*Repository
-	
+
 	for len(allRepos) < maxResults {
 		// Check rate limit before making request
 		if err := c.rateLimiter.CheckRateLimit(ctx, true); err != nil {
 			return nil, fmt.Errorf("rate limit check failed: %w", err)
 		}
-		
+
 		result, resp, err := c.client.Search.Repositories(ctx, query, searchOpts)
-		
+
 		// Update rate limit info from response
 		c.rateLimiter.UpdateFromResponse(resp, true)
-		
+
 		if err != nil {
 			// Check if it's a rate limit error
 			if IsRateLimitError(err) && c.config.WaitForReset {
@@ -257,7 +257,7 @@ func (c *Client) SearchRepositories(ctx context.Context, opts SearchOptions) ([]
 				result, resp, err = c.client.Search.Repositories(ctx, query, searchOpts)
 				c.rateLimiter.UpdateFromResponse(resp, true)
 			}
-			
+
 			if err != nil {
 				return nil, fmt.Errorf("failed to search repositories: %w", err)
 			}
@@ -267,7 +267,7 @@ func (c *Client) SearchRepositories(ctx context.Context, opts SearchOptions) ([]
 			if len(allRepos) >= maxResults {
 				break
 			}
-			
+
 			allRepos = append(allRepos, &Repository{
 				ID:       repo.GetID(),
 				Name:     repo.GetName(),
@@ -357,7 +357,7 @@ func (c *Client) ValidateTokenAccess(ctx context.Context) error {
 // ListUserRepositories lists repositories accessible to the authenticated user
 func (c *Client) ListUserRepositories(ctx context.Context) ([]*Repository, error) {
 	var allRepos []*Repository
-	
+
 	opt := &github.RepositoryListOptions{
 		ListOptions: github.ListOptions{PerPage: 100},
 		Sort:        "updated",
@@ -471,6 +471,7 @@ func (c *Client) CreateRepository(ctx context.Context, opts *CreateRepositoryOpt
 		Name:        github.String(opts.Name),
 		Private:     github.Bool(opts.Private),
 		Description: github.String(opts.Description),
+		AutoInit:    github.Bool(false), // Don't create automatic README.md - we want an empty repository
 	}
 
 	var createdRepo *github.Repository
@@ -499,7 +500,7 @@ func (c *Client) CreateRepository(ctx context.Context, opts *CreateRepositoryOpt
 // UpdateRepository updates repository settings
 func (c *Client) UpdateRepository(ctx context.Context, owner, repo string, opts *UpdateRepositoryOptions) (*github.Repository, error) {
 	update := &github.Repository{}
-	
+
 	if opts.DefaultBranch != "" {
 		update.DefaultBranch = github.String(opts.DefaultBranch)
 	}
@@ -517,7 +518,7 @@ func (c *Client) AddTeamToRepository(ctx context.Context, org, teamSlug, repo, p
 	_, err := c.client.Teams.AddTeamRepoBySlug(ctx, org, teamSlug, org, repo, &github.TeamAddTeamRepoOptions{
 		Permission: permission,
 	})
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to add team %s to repository %s: %w", teamSlug, repo, err)
 	}
