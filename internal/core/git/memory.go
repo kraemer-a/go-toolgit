@@ -123,6 +123,103 @@ func (m *MemoryOperations) CloneRepositoryWithBasicAuth(ctx context.Context, rep
 	}, nil
 }
 
+// GetDefaultBranch returns the default branch of the repository (main or master)
+func (mr *MemoryRepository) GetDefaultBranch() (string, error) {
+	// Try to get HEAD reference
+	head, err := mr.repo.Head()
+	if err == nil {
+		// Extract branch name from HEAD
+		branchName := head.Name().Short()
+		if branchName != "" {
+			return branchName, nil
+		}
+	}
+
+	// If HEAD doesn't work, check for common default branches
+	refs, err := mr.repo.References()
+	if err != nil {
+		return "", fmt.Errorf("failed to get references: %w", err)
+	}
+
+	var mainExists, masterExists bool
+	err = refs.ForEach(func(ref *plumbing.Reference) error {
+		if ref.Name().IsBranch() {
+			branchName := ref.Name().Short()
+			if branchName == "main" {
+				mainExists = true
+			} else if branchName == "master" {
+				masterExists = true
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("failed to iterate references: %w", err)
+	}
+
+	// Prefer main over master
+	if mainExists {
+		return "main", nil
+	}
+	if masterExists {
+		return "master", nil
+	}
+
+	return "", fmt.Errorf("no default branch found (neither main nor master)")
+}
+
+// CommitAndPushToDefault commits changes and pushes directly to the default branch
+func (mr *MemoryRepository) CommitAndPushToDefault(ctx context.Context, commitMessage string) error {
+	// Get the default branch
+	defaultBranch, err := mr.GetDefaultBranch()
+	if err != nil {
+		return fmt.Errorf("failed to get default branch: %w", err)
+	}
+
+	// Get the working tree
+	worktree, err := mr.repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	// Note: We don't need to checkout the default branch because after clone,
+	// the repository is already on the default branch and files have been modified in place
+
+	// Add all changes to staging area
+	_, err = worktree.Add(".")
+	if err != nil {
+		return fmt.Errorf("failed to add changes: %w", err)
+	}
+
+	// Commit the changes
+	_, err = worktree.Commit(commitMessage, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "GitHub Replace Tool",
+			Email: "go-toolgit@automated.tool",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to commit changes: %w", err)
+	}
+
+	// Push directly to the default branch
+	err = mr.repo.PushContext(ctx, &git.PushOptions{
+		RemoteName: "origin",
+		RefSpecs: []config.RefSpec{
+			config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", defaultBranch, defaultBranch)),
+		},
+		Auth: mr.auth,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to push to %s branch: %w", defaultBranch, err)
+	}
+
+	log.Printf("[INFO] Successfully pushed changes directly to %s branch", defaultBranch)
+	return nil
+}
+
 // CloneRepositoryWithMirror clones a repository with all branches and tags using basic auth
 func (m *MemoryOperations) CloneRepositoryWithMirror(ctx context.Context, repoURL, fullName, username, password string) (*MemoryRepository, error) {
 	startTime := time.Now()

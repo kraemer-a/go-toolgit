@@ -95,6 +95,10 @@ type FyneApp struct {
 	prTitleEntry              *widget.Entry
 	prBodyEntry               *widget.Entry
 	branchPrefixEntry         *widget.Entry
+	pushDirectToggle          *ToggleSwitch
+	pushMethodStatusLabel     *widget.Label
+	pushWarningLabel          *widget.Label
+	prSettingsCard            *widget.Card
 
 	// Repository filtering
 	repoFilterEntry      *widget.Entry
@@ -585,16 +589,76 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 	processBtn := widget.NewButtonWithIcon("Process Replacements", theme.MediaPlayIcon(), f.handleProcessReplacements)
 	processBtn.Importance = widget.HighImportance
 
+	// Direct Push toggle with status label
+	f.pushDirectToggle = NewToggleSwitch("", func(enabled bool) {
+		if enabled {
+			f.pushMethodStatusLabel.SetText("Direct Push")
+			f.pushMethodStatusLabel.TextStyle = fyne.TextStyle{Bold: true}
+			f.pushWarningLabel.Show()
+			// Hide PR settings when direct push is enabled
+			if f.prSettingsCard != nil {
+				f.prSettingsCard.Hide()
+			}
+		} else {
+			f.pushMethodStatusLabel.SetText("Pull Request")
+			f.pushMethodStatusLabel.TextStyle = fyne.TextStyle{Bold: false}
+			f.pushWarningLabel.Hide()
+			// Show PR settings when direct push is disabled
+			if f.prSettingsCard != nil {
+				f.prSettingsCard.Show()
+			}
+		}
+		f.pushMethodStatusLabel.Refresh()
+	})
+	f.pushDirectToggle.SetChecked(false) // Default to PR mode
+
+	// Status label showing current mode
+	f.pushMethodStatusLabel = widget.NewLabel("Pull Request")
+	f.pushMethodStatusLabel.TextStyle = fyne.TextStyle{Bold: false}
+
+	f.pushWarningLabel = widget.NewLabel("⚠️ Warning: Direct push will commit changes directly to the default branch.\nMake sure branch protection rules allow this.")
+	f.pushWarningLabel.TextStyle = fyne.TextStyle{Italic: true}
+	f.pushWarningLabel.Hide() // Initially hidden
+
+	// PR Form items (only shown when not in direct push mode)
+	prFormItems := []*widget.FormItem{
+		{Text: "PR Title", Widget: f.prTitleEntry, HintText: "Title for the pull request"},
+		{Text: "PR Body", Widget: f.prBodyEntry, HintText: "Body text for the pull request"},
+		{Text: "Branch Prefix", Widget: f.branchPrefixEntry, HintText: "Prefix for created branch names"},
+	}
+
+	prForm := &widget.Form{
+		Items: prFormItems,
+	}
+
+	// Create PR settings card that can be hidden/shown
+	f.prSettingsCard = widget.NewCard("Pull Request Settings", "Configure pull request details", prForm)
+
 	// Forms with better styling
 	rulesForm := &widget.Form{
 		Items: []*widget.FormItem{
 			{Text: "Include Patterns", Widget: f.includePatternEditor, HintText: "File patterns to include"},
 			{Text: "Exclude Patterns", Widget: f.excludePatternEditor, HintText: "File patterns to exclude"},
-			{Text: "PR Title", Widget: f.prTitleEntry, HintText: "Title for the pull request"},
-			{Text: "PR Body", Widget: f.prBodyEntry, HintText: "Body text for the pull request"},
-			{Text: "Branch Prefix", Widget: f.branchPrefixEntry, HintText: "Prefix for created branch names"},
 		},
 	}
+
+	// Push method selection container with clear labeling
+	pushMethodLabel := widget.NewLabel("Push Method:")
+	pushMethodLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	pushMethodToggleContainer := container.New(layout.NewHBoxLayout(),
+		f.pushDirectToggle,
+		f.pushMethodStatusLabel,
+	)
+
+	pushMethodContainer := container.New(layout.NewVBoxLayout(),
+		container.New(layout.NewHBoxLayout(),
+			pushMethodLabel,
+			layout.NewSpacer(),
+			pushMethodToggleContainer,
+		),
+		f.pushWarningLabel,
+	)
 
 	rulesCard := widget.NewCard("Replacement Rules", "Define string replacement patterns",
 		container.New(layout.NewVBoxLayout(),
@@ -602,7 +666,13 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 			container.NewPadded(addRuleBtn),
 		))
 
-	settingsCard := widget.NewCard("Processing Settings", "File patterns and PR configuration", rulesForm)
+	settingsCard := widget.NewCard("Processing Settings", "File patterns and commit configuration",
+		container.New(layout.NewVBoxLayout(),
+			rulesForm,
+			widget.NewSeparator(),
+			widget.NewCard("", "", pushMethodContainer),
+			f.prSettingsCard,
+		))
 
 	// Create prominent repository section with better visual hierarchy
 	repoHeaderLabel := widget.NewLabel("Repository Selection")
@@ -1539,9 +1609,12 @@ func (f *FyneApp) handleReplacementDryRun() {
 
 	options := ProcessingOptions{
 		DryRun:          true,
+		DirectPush:      f.pushDirectToggle.Checked, // Include current DirectPush state
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
 		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
 		PRTitle:         f.prTitleEntry.Text,
+		PRBody:          f.prBodyEntry.Text,
+		BranchPrefix:    f.branchPrefixEntry.Text,
 	}
 
 	go func() {
@@ -1615,13 +1688,23 @@ func (f *FyneApp) handleProcessReplacements() {
 		return
 	}
 
-	f.showLoading("Processing replacements and creating pull requests...")
+	// Determine if direct push is enabled
+	isDirectPush := f.pushDirectToggle.Checked
+
+	loadingMessage := "Processing replacements and creating pull requests..."
+	if isDirectPush {
+		loadingMessage = "Processing replacements and pushing directly to default branch..."
+	}
+	f.showLoading(loadingMessage)
 
 	options := ProcessingOptions{
 		DryRun:          false,
+		DirectPush:      isDirectPush,
 		IncludePatterns: f.includePatternEditor.GetPatterns(),
 		ExcludePatterns: f.excludePatternEditor.GetPatterns(),
 		PRTitle:         f.prTitleEntry.Text,
+		PRBody:          f.prBodyEntry.Text,
+		BranchPrefix:    f.branchPrefixEntry.Text,
 	}
 
 	go func() {
@@ -1675,7 +1758,11 @@ func (f *FyneApp) handleProcessReplacements() {
 			return
 		}
 
-		f.setStatus(fmt.Sprintf("Applying changes to %d repository(ies) with actual changes...", len(reposWithChanges)))
+		actionMessage := "Applying changes to %d repository(ies) with actual changes..."
+		if isDirectPush {
+			actionMessage = "Pushing changes directly to default branch in %d repository(ies)..."
+		}
+		f.setStatus(fmt.Sprintf(actionMessage, len(reposWithChanges)))
 
 		// Now process only repositories with changes
 		options.DryRun = false
@@ -1686,9 +1773,12 @@ func (f *FyneApp) handleProcessReplacements() {
 			return
 		}
 
-		// Increment API call counter for actual processing (PR creation)
-		for range reposWithChanges {
-			f.operationStatus.IncrementAPICall() // Pull request creation
+		// Increment API call counter for actual processing
+		if !isDirectPush {
+			// Only count PR creation for non-direct push
+			for range reposWithChanges {
+				f.operationStatus.IncrementAPICall() // Pull request creation
+			}
 		}
 
 		f.hideLoading()
@@ -2278,8 +2368,16 @@ func (f *FyneApp) createColoredDiffText(diffContent string) *widget.RichText {
 }
 
 func (f *FyneApp) applyChanges(rules []ReplacementRule, repos []Repository, options ProcessingOptions) {
-	f.setStatus("Applying changes and creating pull requests...")
-	f.showLoading("Applying changes and creating pull requests...")
+	// Determine if direct push is enabled and update options
+	isDirectPush := f.pushDirectToggle.Checked
+	options.DirectPush = isDirectPush // Ensure options has the current DirectPush state
+
+	loadingMessage := "Applying changes and creating pull requests..."
+	if isDirectPush {
+		loadingMessage = "Applying changes and pushing directly to default branch..."
+	}
+	f.setStatus(loadingMessage)
+	f.showLoading(loadingMessage)
 
 	go func() {
 		// First, run a dry run to determine which repositories have changes
@@ -2332,7 +2430,11 @@ func (f *FyneApp) applyChanges(rules []ReplacementRule, repos []Repository, opti
 			return
 		}
 
-		f.setStatus(fmt.Sprintf("Applying changes to %d repository(ies) with actual changes...", len(reposWithChanges)))
+		actionMessage := "Applying changes to %d repository(ies) with actual changes..."
+		if isDirectPush {
+			actionMessage = "Pushing changes directly to default branch in %d repository(ies)..."
+		}
+		f.setStatus(fmt.Sprintf(actionMessage, len(reposWithChanges)))
 
 		// Now process only repositories with changes
 		options.DryRun = false
@@ -2343,9 +2445,12 @@ func (f *FyneApp) applyChanges(rules []ReplacementRule, repos []Repository, opti
 			return
 		}
 
-		// Increment API call counter for actual processing (PR creation)
-		for range reposWithChanges {
-			f.operationStatus.IncrementAPICall() // Pull request creation
+		// Increment API call counter for actual processing
+		if !isDirectPush {
+			// Only count PR creation for non-direct push
+			for range reposWithChanges {
+				f.operationStatus.IncrementAPICall() // Pull request creation
+			}
 		}
 
 		f.hideLoading()

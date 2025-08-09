@@ -39,6 +39,7 @@ type ReplacementRule struct {
 // ProcessingOptions contains options for processing replacements
 type ProcessingOptions struct {
 	DryRun          bool     `json:"dry_run"`
+	DirectPush      bool     `json:"direct_push"`
 	IncludePatterns []string `json:"include_patterns"`
 	ExcludePatterns []string `json:"exclude_patterns"`
 	PRTitle         string   `json:"pr_title"`
@@ -550,8 +551,8 @@ func (s *Service) ProcessReplacements(rules []ReplacementRule, repos []Repositor
 		}
 		owner, repoName := parts[0], parts[1]
 
-		// Process repository using memory-based git operations
-		result, err := memoryProcessor.ProcessRepository(ctx, repo.CloneURL, repo.FullName, options.BranchPrefix, options.DryRun)
+		// Process repository using memory-based git operations with DirectPush option
+		result, err := memoryProcessor.ProcessRepositoryWithOptions(ctx, repo.CloneURL, repo.FullName, options.BranchPrefix, options.DryRun, options.DirectPush)
 		if err != nil {
 			repoResults = append(repoResults, RepositoryResult{
 				Repository: repo.FullName,
@@ -575,12 +576,20 @@ func (s *Service) ProcessReplacements(rules []ReplacementRule, repos []Repositor
 			repoResult.Message = result.Error.Error()
 		}
 
-		// If not dry run and changes were made, create PR
-		if !options.DryRun && result.Success && len(result.FilesChanged) > 0 && result.Branch != "" {
+		// If not dry run and changes were made, create PR (only if not direct push)
+		if !options.DryRun && !options.DirectPush && result.Success && len(result.FilesChanged) > 0 && result.Branch != "" {
+			// Get the actual default branch for this repository
+			defaultBranch, err := s.githubClient.GetRepositoryDefaultBranch(ctx, owner, repoName)
+			if err != nil {
+				// Fallback to main if we can't get the default branch
+				s.logger.Debug("Failed to get default branch, falling back to 'main'", "repo", repo.FullName, "error", err)
+				defaultBranch = "main"
+			}
+
 			prOptions := &github.PullRequestOptions{
 				Title: options.PRTitle,
 				Head:  result.Branch,
-				Base:  "main", // Default to main branch
+				Base:  defaultBranch,
 				Body:  options.PRBody,
 			}
 
@@ -591,6 +600,9 @@ func (s *Service) ProcessReplacements(rules []ReplacementRule, repos []Repositor
 				repoResult.PRUrl = pr.GetHTMLURL()
 				repoResult.Message = "Changes applied and PR created"
 			}
+		} else if !options.DryRun && options.DirectPush && result.Success && len(result.FilesChanged) > 0 {
+			// For direct push, we don't create PR but confirm changes were pushed
+			repoResult.Message = "Changes pushed directly to default branch"
 		}
 
 		// For dry run, generate actual diffs from FileChanges

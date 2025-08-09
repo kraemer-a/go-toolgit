@@ -465,6 +465,21 @@ func (c *Client) GetRepository(ctx context.Context, repoFullName string) (*githu
 	return repository, nil
 }
 
+// GetRepositoryDefaultBranch returns the default branch name for a repository
+func (c *Client) GetRepositoryDefaultBranch(ctx context.Context, owner, repo string) (string, error) {
+	repository, _, err := c.client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "", fmt.Errorf("failed to get repository info: %w", err)
+	}
+
+	defaultBranch := repository.GetDefaultBranch()
+	if defaultBranch == "" {
+		return "main", nil // Fallback to main if empty
+	}
+
+	return defaultBranch, nil
+}
+
 // CreateRepository creates a new repository
 func (c *Client) CreateRepository(ctx context.Context, opts *CreateRepositoryOptions) (*Repository, error) {
 	repo := &github.Repository{

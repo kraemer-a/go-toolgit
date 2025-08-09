@@ -128,24 +128,24 @@ type toggleSwitchRenderer struct {
 }
 
 func (r *toggleSwitchRenderer) Layout(size fyne.Size) {
-	r.toggle.background.Resize(fyne.NewSize(48, 24))
-	r.toggle.handle.Resize(fyne.NewSize(20, 20))
+	r.toggle.background.Resize(fyne.NewSize(36, 18))
+	r.toggle.handle.Resize(fyne.NewSize(14, 14))
 
 	if r.toggle.Checked {
-		r.toggle.handle.Move(fyne.NewPos(26, 2))
+		r.toggle.handle.Move(fyne.NewPos(20, 2))
 	} else {
 		r.toggle.handle.Move(fyne.NewPos(2, 2))
 	}
 }
 
 func (r *toggleSwitchRenderer) MinSize() fyne.Size {
-	return fyne.NewSize(48, 24)
+	return fyne.NewSize(36, 18)
 }
 
 func (r *toggleSwitchRenderer) Refresh() {
 	if r.toggle.Checked {
 		r.toggle.background.FillColor = color.RGBA{R: 59, G: 130, B: 246, A: 255} // Softer blue
-		r.toggle.handle.Move(fyne.NewPos(26, 2))
+		r.toggle.handle.Move(fyne.NewPos(20, 2))
 	} else {
 		r.toggle.background.FillColor = color.RGBA{156, 163, 175, 255} // Gray
 		r.toggle.handle.Move(fyne.NewPos(2, 2))
@@ -219,7 +219,7 @@ func ShowToast(window fyne.Window, message string, toastType string) {
 	toastSize := fyne.NewSize(300, 60) // Fixed size for consistency
 	margin := float32(20)
 	finalX := (windowSize.Width - toastSize.Width) / 2 // Center horizontally
-	finalY := margin                                    // Top with margin
+	finalY := margin                                   // Top with margin
 	startY := -toastSize.Height                        // Start above window
 
 	// Create a tappable button for click-to-dismiss functionality
@@ -234,10 +234,10 @@ func ShowToast(window fyne.Window, message string, toastType string) {
 		container.NewPadded(content),
 		dismissButton, // Invisible button overlay for clicking the toast
 	)
-	
+
 	// Create minimal overlay using NewWithoutLayout and only add the toast
 	overlay := container.NewWithoutLayout(toastContainer)
-	
+
 	// Set up dismiss button callback now that overlay exists
 	dismissButton.OnTapped = func() {
 		window.Canvas().Overlays().Remove(overlay)

@@ -39,6 +39,11 @@ func NewMemoryProcessor(engine *ReplacementEngine, gitOps *git.MemoryOperations)
 
 // ProcessRepository processes a single repository using in-memory git operations
 func (p *MemoryProcessor) ProcessRepository(ctx context.Context, repoURL, fullName, branchPrefix string, dryRun bool) (*MemoryProcessResult, error) {
+	return p.ProcessRepositoryWithOptions(ctx, repoURL, fullName, branchPrefix, dryRun, false)
+}
+
+// ProcessRepositoryWithOptions processes a single repository with direct push option
+func (p *MemoryProcessor) ProcessRepositoryWithOptions(ctx context.Context, repoURL, fullName, branchPrefix string, dryRun, directPush bool) (*MemoryProcessResult, error) {
 	result := &MemoryProcessResult{
 		Repository: fullName,
 		Success:    false,
@@ -119,24 +124,37 @@ func (p *MemoryProcessor) ProcessRepository(ctx context.Context, repoURL, fullNa
 		return result, nil
 	}
 
-	// Create a new branch and commit changes
-	branchName := p.gitOps.GenerateBranchName(branchPrefix)
+	// Prepare commit message
 	commitMessage := fmt.Sprintf("Replace strings across %d files\n\nAutomated replacement by go-toolgit tool\n\n- Files modified: %d\n- Total replacements: %d",
 		len(modifiedFiles), len(modifiedFiles), totalReplacements)
 
-	err = memRepo.CreateBranchAndCommit(branchName, commitMessage)
-	if err != nil {
-		result.Error = fmt.Errorf("failed to create branch and commit: %w", err)
-		return result, result.Error
-	}
+	if directPush {
+		// Direct push mode: commit and push directly to default branch
+		err = memRepo.CommitAndPushToDefault(ctx, commitMessage)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to commit and push to default branch: %w", err)
+			return result, result.Error
+		}
+		// No branch name for direct push
+		result.Branch = ""
+	} else {
+		// Pull request mode: create new branch and push
+		branchName := p.gitOps.GenerateBranchName(branchPrefix)
 
-	result.Branch = branchName
+		err = memRepo.CreateBranchAndCommit(branchName, commitMessage)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to create branch and commit: %w", err)
+			return result, result.Error
+		}
 
-	// Push the branch to remote
-	err = memRepo.Push(ctx, branchName)
-	if err != nil {
-		result.Error = fmt.Errorf("failed to push branch: %w", err)
-		return result, result.Error
+		result.Branch = branchName
+
+		// Push the branch to remote
+		err = memRepo.Push(ctx, branchName)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to push branch: %w", err)
+			return result, result.Error
+		}
 	}
 
 	result.Success = true
