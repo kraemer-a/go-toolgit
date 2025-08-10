@@ -96,7 +96,7 @@ func (t *ToggleSwitch) SetChecked(checked bool) {
 	var endX float32
 	if checked {
 		endX = 26
-		t.background.FillColor = color.RGBA{R: 59, G: 130, B: 246, A: 255} // Softer blue
+		t.background.FillColor = theme.PrimaryColor()
 	} else {
 		endX = 2
 		t.background.FillColor = color.RGBA{156, 163, 175, 255} // Gray
@@ -144,7 +144,7 @@ func (r *toggleSwitchRenderer) MinSize() fyne.Size {
 
 func (r *toggleSwitchRenderer) Refresh() {
 	if r.toggle.Checked {
-		r.toggle.background.FillColor = color.RGBA{R: 59, G: 130, B: 246, A: 255} // Softer blue
+		r.toggle.background.FillColor = theme.PrimaryColor()
 		r.toggle.handle.Move(fyne.NewPos(20, 2))
 	} else {
 		r.toggle.background.FillColor = color.RGBA{156, 163, 175, 255} // Gray

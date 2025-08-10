@@ -101,6 +101,42 @@ func (f *FyneApp) createFileOperationsLeftColumn() *container.Scroll {
 			"• Operation: Move to relocate, Rename to change name",
 	))
 
+	// PR/Push settings (moved from right column)
+	f.fileOpsPRTitleEntry = widget.NewEntry()
+	f.fileOpsPRTitleEntry.SetPlaceHolder("PR Title (e.g., 'chore: rename configuration files')")
+	f.fileOpsPRTitleEntry.SetText("chore: file operations")
+
+	f.fileOpsPRBodyEntry = widget.NewMultiLineEntry()
+	f.fileOpsPRBodyEntry.SetPlaceHolder("PR Description...")
+	f.fileOpsPRBodyEntry.SetText("Automated file operations performed by go-toolgit tool.")
+	f.fileOpsPRBodyEntry.SetMinRowsVisible(3)
+
+	f.fileOpsBranchPrefixEntry = widget.NewEntry()
+	f.fileOpsBranchPrefixEntry.SetPlaceHolder("Branch prefix (e.g., 'file-ops')")
+	f.fileOpsBranchPrefixEntry.SetText("file-ops")
+
+	// Direct push toggle
+	f.fileOpsPushDirectToggle = NewToggleSwitch("🔄 Push directly to default branch", func(checked bool) {
+		f.updateFileOpsPushMethodStatus(checked)
+	})
+
+	pushMethodContainer := container.New(layout.NewVBoxLayout(),
+		f.fileOpsPushDirectToggle,
+		widget.NewLabel("⚠️ Direct push bypasses PR review process"),
+	)
+
+	// PR Settings Card
+	prSettingsCard := widget.NewCard("Pull Request Settings", "", container.New(layout.NewVBoxLayout(),
+		widget.NewLabel("PR Title:"),
+		f.fileOpsPRTitleEntry,
+		widget.NewLabel("PR Body:"),
+		f.fileOpsPRBodyEntry,
+		widget.NewLabel("Branch Prefix:"),
+		f.fileOpsBranchPrefixEntry,
+		widget.NewSeparator(),
+		pushMethodContainer,
+	))
+
 	// Create scrollable left column
 	leftColumn := container.NewScroll(
 		container.New(
@@ -112,6 +148,7 @@ func (f *FyneApp) createFileOperationsLeftColumn() *container.Scroll {
 				),
 			),
 			instructions,
+			prSettingsCard,
 		),
 	)
 	leftColumn.SetMinSize(fyne.NewSize(600, 400))
@@ -159,31 +196,7 @@ func (f *FyneApp) createFileOperationsRightColumn() *fyne.Container {
 		layout.NewSpacer(),
 	)
 
-	// PR/Push settings
-	f.fileOpsPRTitleEntry = widget.NewEntry()
-	f.fileOpsPRTitleEntry.SetPlaceHolder("PR Title (e.g., 'chore: rename configuration files')")
-	f.fileOpsPRTitleEntry.SetText("chore: file operations")
-
-	f.fileOpsPRBodyEntry = widget.NewMultiLineEntry()
-	f.fileOpsPRBodyEntry.SetPlaceHolder("PR Description...")
-	f.fileOpsPRBodyEntry.SetText("Automated file operations performed by go-toolgit tool.")
-	f.fileOpsPRBodyEntry.SetMinRowsVisible(3)
-
-	f.fileOpsBranchPrefixEntry = widget.NewEntry()
-	f.fileOpsBranchPrefixEntry.SetPlaceHolder("Branch prefix (e.g., 'file-ops')")
-	f.fileOpsBranchPrefixEntry.SetText("file-ops")
-
-	// Direct push toggle
-	f.fileOpsPushDirectToggle = NewToggleSwitch("🔄 Push directly to default branch", func(checked bool) {
-		f.updateFileOpsPushMethodStatus(checked)
-	})
-
-	pushMethodContainer := container.New(layout.NewVBoxLayout(),
-		f.fileOpsPushDirectToggle,
-		widget.NewLabel("⚠️ Direct push bypasses PR review process"),
-	)
-
-	// Create repository section
+	// Create repository section (copy exact structure from String Replacement tab)
 	repoHeaderLabel := widget.NewLabel("Repository Selection")
 	repoHeaderLabel.TextStyle = fyne.TextStyle{Bold: true}
 	repoSubLabel := widget.NewLabel("Load and select target repositories")
@@ -194,28 +207,25 @@ func (f *FyneApp) createFileOperationsRightColumn() *fyne.Container {
 		widget.NewSeparator(),
 	)
 
-	repoContainer := container.New(layout.NewVBoxLayout(),
-		repoHeader,
+	// Combine buttons into one section like String Replacement tab
+	repoButtons := container.New(layout.NewVBoxLayout(),
 		loadSection,
 		f.fileOpsFilterEntry,
 		selectionButtons,
-		widget.NewSeparator(),
-		repoScroll,
-		widget.NewSeparator(),
-		widget.NewCard("", "", container.New(layout.NewVBoxLayout(),
-			widget.NewLabel("PR Title:"),
-			f.fileOpsPRTitleEntry,
-			widget.NewLabel("PR Body:"),
-			f.fileOpsPRBodyEntry,
-			widget.NewLabel("Branch Prefix:"),
-			f.fileOpsBranchPrefixEntry,
-			widget.NewSeparator(),
-			widget.NewCard("", "", pushMethodContainer),
-		)),
 	)
 
-	rightColumn := repoContainer
-	rightColumn.Resize(fyne.NewSize(500, 400))
+	// Group fixed-height elements for the top section (exact copy from String Replacement)
+	topSection := container.New(layout.NewVBoxLayout(),
+		repoHeader,
+		repoButtons,
+		widget.NewSeparator(),
+	)
+
+	// Use BorderLayout so scroll area expands to fill available space
+	rightColumn := container.New(layout.NewBorderLayout(topSection, nil, nil, nil),
+		topSection, // Top border (fixed height)
+		repoScroll, // Center (expands to fill)
+	)
 
 	return rightColumn
 }
@@ -290,18 +300,21 @@ func (f *FyneApp) displayFileOpsRepositories() {
 	for i := range f.fileOpsFilteredRepos {
 		repo := &f.fileOpsFilteredRepos[i]
 
-		check := widget.NewCheck(repo.Name, func(checked bool) {
+		toggle := NewToggleSwitch("", func(checked bool) {
 			repo.Selected = checked
 			f.updateFileOpsSelectionCount()
 		})
-		check.SetChecked(repo.Selected)
+		toggle.SetChecked(repo.Selected)
+
+		label := widget.NewLabel(repo.Name)
+		label.TextStyle = fyne.TextStyle{Bold: true}
 
 		privateLabel := widget.NewLabel("")
 		if repo.Private {
 			privateLabel = widget.NewLabel("🔒")
 		}
 
-		repoContainer := container.New(layout.NewBorderLayout(nil, nil, check, privateLabel), check, privateLabel)
+		repoContainer := container.New(layout.NewBorderLayout(nil, nil, toggle, privateLabel), toggle, label)
 
 		f.fileOpsRepoWidgets = append(f.fileOpsRepoWidgets, repoContainer)
 		f.fileOpsRepoContainer.Add(repoContainer)
