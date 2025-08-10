@@ -87,6 +87,7 @@ func (f *FyneApp) createFileOperationsLeftColumn() *container.Scroll {
 
 	// Rules scroll container
 	f.fileOperationsRulesScroll = container.NewVScroll(f.fileOperationsRulesContainer)
+	f.fileOperationsRulesScroll.SetMinSize(fyne.NewSize(0, 200))
 
 	// Add initial rule
 	f.addFileOperationRule()
@@ -125,8 +126,8 @@ func (f *FyneApp) createFileOperationsLeftColumn() *container.Scroll {
 		widget.NewLabel("⚠️ Direct push bypasses PR review process"),
 	)
 
-	// PR Settings Card
-	prSettingsCard := widget.NewCard("Pull Request Settings", "", container.New(layout.NewVBoxLayout(),
+	// Create PR fields container that can be shown/hidden
+	f.fileOpsPRSettingsContainer = container.New(layout.NewVBoxLayout(),
 		widget.NewLabel("PR Title:"),
 		f.fileOpsPRTitleEntry,
 		widget.NewLabel("PR Body:"),
@@ -134,8 +135,16 @@ func (f *FyneApp) createFileOperationsLeftColumn() *container.Scroll {
 		widget.NewLabel("Branch Prefix:"),
 		f.fileOpsBranchPrefixEntry,
 		widget.NewSeparator(),
+	)
+
+	// PR Settings Card with dynamic content
+	prSettingsCard := widget.NewCard("Pull Request Settings", "", container.New(layout.NewVBoxLayout(),
+		f.fileOpsPRSettingsContainer,
 		pushMethodContainer,
 	))
+
+	// Set initial visibility state (PR settings visible by default, Direct Push is off)
+	f.fileOpsPRSettingsContainer.Show()
 
 	// Create scrollable left column
 	leftColumn := container.NewScroll(
@@ -365,13 +374,15 @@ func (f *FyneApp) updateFileOpsSelectionCount() {
 	}
 }
 
-// updateFileOpsPushMethodStatus updates the push method status label
+// updateFileOpsPushMethodStatus updates the push method status and PR settings visibility
 func (f *FyneApp) updateFileOpsPushMethodStatus(directPush bool) {
-	// Find the status label and warning in the PR settings card
-	// This is a simplified version - in production you'd store these as fields
 	if directPush {
+		// Hide PR settings when direct push is enabled
+		f.fileOpsPRSettingsContainer.Hide()
 		f.setStatus("⚠️ Direct push mode enabled - changes will be pushed to default branch")
 	} else {
+		// Show PR settings when PR mode is enabled
+		f.fileOpsPRSettingsContainer.Show()
 		f.setStatus("Pull request mode - changes will create PRs for review")
 	}
 }

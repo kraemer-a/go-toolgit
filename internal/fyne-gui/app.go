@@ -116,6 +116,7 @@ type FyneApp struct {
 	fileOpsPRTitleEntry          *widget.Entry
 	fileOpsPRBodyEntry           *widget.Entry
 	fileOpsBranchPrefixEntry     *widget.Entry
+	fileOpsPRSettingsContainer   *fyne.Container
 
 	// Migration widgets
 	sourceURLEntry             *widget.Entry
