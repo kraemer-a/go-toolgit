@@ -66,6 +66,22 @@ type RepositoryResult struct {
 	Replacements int      `json:"replacements"`
 }
 
+// FileOperationRule defines a file operation (move/rename)
+type FileOperationRule struct {
+	SourcePath    string `json:"source_path"`
+	TargetPath    string `json:"target_path"`
+	SearchMode    string `json:"search_mode"`    // "exact" or "filename"
+	OperationType string `json:"operation_type"` // "move" or "rename"
+}
+
+// FileOperationResult contains the results of file operations
+type FileOperationResult struct {
+	Success           bool                `json:"success"`
+	Message           string              `json:"message"`
+	RepositoryResults []RepositoryResult  `json:"repository_results"`
+	FileMatches       map[string][]string `json:"file_matches,omitempty"` // repo -> list of matched files
+}
+
 // ConfigData holds configuration data for the GUI
 type ConfigData struct {
 	Provider string `json:"provider"`
@@ -884,6 +900,134 @@ func initializeViper() {
 
 	// Try to read the config file
 	viper.ReadInConfig()
+}
+
+// ProcessFileOperations processes file operations across repositories
+func (s *Service) ProcessFileOperations(rules []FileOperationRule, repos []Repository, options ProcessingOptions) (*FileOperationResult, error) {
+	if s.gitOps == nil || s.githubClient == nil {
+		return nil, fmt.Errorf("service components not initialized")
+	}
+
+	ctx := context.Background()
+
+	// Convert GUI rules to processor rules
+	var processorRules []processor.FileOperationRule
+	for _, rule := range rules {
+		processorRules = append(processorRules, processor.FileOperationRule{
+			SourcePath:    rule.SourcePath,
+			TargetPath:    rule.TargetPath,
+			SearchMode:    rule.SearchMode,
+			OperationType: rule.OperationType,
+		})
+	}
+
+	// Create file processor
+	fileProcessor := processor.NewFileProcessor(s.gitOps)
+
+	// Process each repository
+	var repoResults []RepositoryResult
+	fileMatches := make(map[string][]string)
+	successCount := 0
+
+	for _, repo := range repos {
+		// Parse owner/repo from full name
+		parts := strings.SplitN(repo.FullName, "/", 2)
+		if len(parts) != 2 {
+			repoResults = append(repoResults, RepositoryResult{
+				Repository: repo.FullName,
+				Success:    false,
+				Message:    "Invalid repository name format",
+			})
+			continue
+		}
+		owner, repoName := parts[0], parts[1]
+
+		// Process repository with file operations
+		result, err := fileProcessor.ProcessRepository(ctx, repo.CloneURL, repo.FullName, options.BranchPrefix, processorRules, options.DryRun, options.DirectPush)
+		if err != nil {
+			repoResults = append(repoResults, RepositoryResult{
+				Repository: repo.FullName,
+				Success:    false,
+				Message:    fmt.Sprintf("Processing failed: %v", err),
+			})
+			continue
+		}
+
+		// Store file matches for dry run preview
+		if options.DryRun && len(result.FileMatches) > 0 {
+			fileMatches[repo.FullName] = result.FileMatches
+		}
+
+		// Create repository result
+		repoResult := RepositoryResult{
+			Repository:   result.Repository,
+			Success:      result.Success,
+			Message:      "File operations completed successfully",
+			FilesChanged: result.FilesChanged,
+			Replacements: len(result.FilesChanged), // Use file count as "replacements"
+		}
+
+		if result.Error != nil {
+			repoResult.Success = false
+			repoResult.Message = result.Error.Error()
+		}
+
+		// If not dry run and changes were made, create PR or set commit URL
+		if !options.DryRun && result.Success && len(result.FilesChanged) > 0 {
+			if !options.DirectPush && result.Branch != "" {
+				// Create pull request
+				defaultBranch, err := s.githubClient.GetRepositoryDefaultBranch(ctx, owner, repoName)
+				if err != nil {
+					s.logger.Debug("Failed to get default branch, falling back to 'main'", "repo", repo.FullName, "error", err)
+					defaultBranch = "main"
+				}
+
+				prOptions := &github.PullRequestOptions{
+					Title: options.PRTitle,
+					Head:  result.Branch,
+					Base:  defaultBranch,
+					Body:  options.PRBody,
+				}
+
+				pr, err := s.githubClient.CreatePullRequest(ctx, owner, repoName, prOptions)
+				if err != nil {
+					repoResult.Message = fmt.Sprintf("File operations applied but failed to create PR: %v", err)
+				} else {
+					repoResult.PRUrl = pr.GetHTMLURL()
+					repoResult.Message = "File operations applied and PR created"
+				}
+			} else if options.DirectPush {
+				// Direct push - generate commit URL
+				repoResult.Message = "File operations pushed directly to default branch"
+				if result.CommitHash != "" {
+					baseURL := s.config.GitHub.BaseURL
+					if baseURL == "" || baseURL == "https://api.github.com" {
+						repoResult.CommitURL = fmt.Sprintf("https://github.com/%s/commit/%s", repo.FullName, result.CommitHash)
+					} else {
+						domain := strings.Replace(baseURL, "/api/v3", "", 1)
+						domain = strings.Replace(domain, "/api", "", 1)
+						repoResult.CommitURL = fmt.Sprintf("%s/%s/commit/%s", domain, repo.FullName, result.CommitHash)
+					}
+				}
+			}
+		}
+
+		repoResults = append(repoResults, repoResult)
+		if result.Success {
+			successCount++
+		}
+	}
+
+	// Create overall result
+	overallSuccess := successCount == len(repos)
+	message := fmt.Sprintf("Processed %d repositories, %d successful", len(repos), successCount)
+
+	return &FileOperationResult{
+		Success:           overallSuccess,
+		Message:           message,
+		RepositoryResults: repoResults,
+		FileMatches:       fileMatches,
+	}, nil
 }
 
 // generateDiffFromFileChange generates a unified diff from FileChange data

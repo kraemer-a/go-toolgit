@@ -864,6 +864,77 @@ func (m *MemoryOperations) GenerateBranchName(prefix string) string {
 	return fmt.Sprintf("%s-%s", prefix, timestamp)
 }
 
+// MoveFile moves or renames a file in the repository
+func (mr *MemoryRepository) MoveFile(oldPath, newPath string) error {
+	// Ensure source file exists
+	if _, err := mr.fs.Stat(oldPath); err != nil {
+		return fmt.Errorf("source file not found: %s", oldPath)
+	}
+
+	// Create target directory if needed
+	targetDir := filepath.Dir(newPath)
+	if targetDir != "." && targetDir != "" {
+		if err := mr.fs.MkdirAll(targetDir, 0755); err != nil {
+			return fmt.Errorf("failed to create target directory: %w", err)
+		}
+	}
+
+	// Move the file using billy's Rename
+	if err := mr.fs.Rename(oldPath, newPath); err != nil {
+		return fmt.Errorf("failed to move file from %s to %s: %w", oldPath, newPath, err)
+	}
+
+	return nil
+}
+
+// DeleteFile removes a file from the repository
+func (mr *MemoryRepository) DeleteFile(path string) error {
+	// Check if file exists
+	if _, err := mr.fs.Stat(path); err != nil {
+		return fmt.Errorf("file not found: %s", path)
+	}
+
+	// Remove the file
+	if err := mr.fs.Remove(path); err != nil {
+		return fmt.Errorf("failed to delete file %s: %w", path, err)
+	}
+
+	return nil
+}
+
+// FindFiles searches for files matching a pattern
+func (mr *MemoryRepository) FindFiles(pattern string, searchMode string) ([]string, error) {
+	var matches []string
+
+	// For exact path mode, just check if the file exists
+	if searchMode == "exact" {
+		if _, err := mr.fs.Stat(pattern); err == nil {
+			matches = append(matches, pattern)
+		}
+		return matches, nil
+	}
+
+	// For filename search mode, search entire repository
+	basePattern := filepath.Base(pattern)
+	err := walkFiles(mr.fs, "/", func(path string, info os.FileInfo) error {
+		if info.IsDir() {
+			return nil
+		}
+
+		// Remove leading slash for consistency
+		cleanPath := strings.TrimPrefix(path, "/")
+
+		// Match against filename
+		if matched, _ := filepath.Match(basePattern, filepath.Base(cleanPath)); matched {
+			matches = append(matches, cleanPath)
+		}
+
+		return nil
+	})
+
+	return matches, err
+}
+
 // walkFiles is a helper function to walk through files in the filesystem
 func walkFiles(fs billy.Filesystem, root string, fn func(path string, info os.FileInfo) error) error {
 	files, err := fs.ReadDir(root)

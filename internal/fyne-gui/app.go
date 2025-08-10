@@ -105,6 +105,18 @@ type FyneApp struct {
 	filteredRepositories []Repository
 	repoWidgets          []*fyne.Container
 
+	// File operations widgets
+	fileOperationsRulesContainer *fyne.Container
+	fileOperationsRulesScroll    *container.Scroll
+	fileOpsRepoContainer         *fyne.Container
+	fileOpsFilterEntry           *widget.Entry
+	fileOpsFilteredRepos         []Repository
+	fileOpsRepoWidgets           []*fyne.Container
+	fileOpsPushDirectToggle      *ToggleSwitch
+	fileOpsPRTitleEntry          *widget.Entry
+	fileOpsPRBodyEntry           *widget.Entry
+	fileOpsBranchPrefixEntry     *widget.Entry
+
 	// Migration widgets
 	sourceURLEntry             *widget.Entry
 	targetOrgEntry             *widget.Entry
@@ -255,6 +267,7 @@ func (f *FyneApp) setupUI() {
 	f.currentTab = container.NewAppTabs(
 		container.NewTabItemWithIcon("Configuration", theme.SettingsIcon(), f.createConfigTab()),
 		container.NewTabItemWithIcon("String Replacement", theme.DocumentCreateIcon(), f.createReplacementTab()),
+		container.NewTabItemWithIcon("File Operations", theme.FolderOpenIcon(), f.createFileOperationsTab()),
 		container.NewTabItemWithIcon("Repository Migration", theme.UploadIcon(), f.createMigrationTab()),
 	)
 
