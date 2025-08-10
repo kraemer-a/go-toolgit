@@ -191,6 +191,127 @@ func (p *FileProcessor) calculateTargetPath(sourcePath string, rule FileOperatio
 	return rule.TargetPath
 }
 
+// ProcessRepositoryWithAuth processes file operations for a single repository using basic auth
+func (p *FileProcessor) ProcessRepositoryWithAuth(ctx context.Context, repoURL, fullName, username, password, branchPrefix string, rules []FileOperationRule, dryRun, directPush bool) (*FileProcessResult, error) {
+	result := &FileProcessResult{
+		Repository: fullName,
+		Success:    false,
+	}
+
+	// Clone repository into memory using basic auth
+	memRepo, err := p.gitOps.CloneRepositoryWithBasicAuth(ctx, repoURL, fullName, username, password)
+	if err != nil {
+		result.Error = fmt.Errorf("failed to clone repository: %w", err)
+		return result, result.Error
+	}
+
+	var allChangedFiles []string
+	var allMatchedFiles []string
+
+	// Process each rule
+	for _, rule := range rules {
+		// Find matching files
+		matches, err := memRepo.FindFiles(rule.SourcePath, rule.SearchMode)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to find files: %w", err)
+			return result, result.Error
+		}
+
+		allMatchedFiles = append(allMatchedFiles, matches...)
+
+		// Skip if no matches found
+		if len(matches) == 0 {
+			continue
+		}
+
+		// Process each matched file
+		for _, matchedFile := range matches {
+			targetPath := p.calculateTargetPath(matchedFile, rule)
+
+			// Skip if source and target are the same
+			if matchedFile == targetPath {
+				continue
+			}
+
+			if !dryRun {
+				// Perform the actual file operation
+				if rule.OperationType == "move" || rule.OperationType == "rename" {
+					err = memRepo.MoveFile(matchedFile, targetPath)
+					if err != nil {
+						result.Error = fmt.Errorf("failed to move file %s to %s: %w", matchedFile, targetPath, err)
+						return result, result.Error
+					}
+				}
+			}
+
+			allChangedFiles = append(allChangedFiles, fmt.Sprintf("%s → %s", matchedFile, targetPath))
+		}
+	}
+
+	result.FilesChanged = allChangedFiles
+	result.FileMatches = allMatchedFiles
+
+	// If no changes, return success
+	if len(allChangedFiles) == 0 {
+		result.Success = true
+		return result, nil
+	}
+
+	// If dry run, don't make actual changes
+	if dryRun {
+		result.Success = true
+		return result, nil
+	}
+
+	// Check if there are actual changes in git
+	hasChanges, err := memRepo.HasChanges()
+	if err != nil {
+		result.Error = fmt.Errorf("failed to check for changes: %w", err)
+		return result, result.Error
+	}
+
+	if !hasChanges {
+		result.Success = true
+		return result, nil
+	}
+
+	// Prepare commit message
+	commitMessage := fmt.Sprintf("Move/rename %d file(s)\n\nAutomated file operations by go-toolgit tool\n\nFiles affected:\n%s",
+		len(allChangedFiles), strings.Join(allChangedFiles, "\n"))
+
+	if directPush {
+		// Direct push mode: commit and push directly to default branch
+		commitHash, err := memRepo.CommitAndPushToDefault(ctx, commitMessage)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to commit and push to default branch: %w", err)
+			return result, result.Error
+		}
+		result.CommitHash = commitHash
+		result.Branch = ""
+	} else {
+		// Pull request mode: create new branch and push
+		branchName := p.gitOps.GenerateBranchName(branchPrefix)
+
+		err = memRepo.CreateBranchAndCommit(branchName, commitMessage)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to create branch and commit: %w", err)
+			return result, result.Error
+		}
+
+		result.Branch = branchName
+
+		// Push the branch to remote
+		err = memRepo.Push(ctx, branchName)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to push branch: %w", err)
+			return result, result.Error
+		}
+	}
+
+	result.Success = true
+	return result, nil
+}
+
 // FindFilesInRepository finds files matching patterns in a repository (for preview)
 func (p *FileProcessor) FindFilesInRepository(ctx context.Context, repoURL, fullName string, rules []FileOperationRule) ([]string, error) {
 	// Clone repository into memory

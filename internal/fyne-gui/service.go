@@ -148,11 +148,12 @@ type RateLimitInfo = github.RateLimitInfo
 
 // Service provides the business logic for the Fyne GUI
 type Service struct {
-	config       *config.Config
-	logger       *utils.Logger
-	githubClient *github.Client
-	gitOps       *git.MemoryOperations
-	engine       *processor.ReplacementEngine
+	config          *config.Config
+	logger          *utils.Logger
+	githubClient    *github.Client
+	bitbucketClient *bitbucket.Client
+	gitOps          *git.MemoryOperations
+	engine          *processor.ReplacementEngine
 }
 
 // NewService creates a new Service instance
@@ -356,6 +357,30 @@ func (s *Service) InitializeServiceConfig(configData ConfigData) error {
 		// Initialize git memory operations with GitHub token
 		s.gitOps = git.NewMemoryOperations(configData.Token)
 	} else if configData.Provider == "bitbucket" {
+		// Bitbucket provider requires Bitbucket client
+		if s.config.Bitbucket.BaseURL == "" || s.config.Bitbucket.Username == "" || s.config.Bitbucket.Password == "" {
+			return fmt.Errorf("Bitbucket provider requires base URL, username and password")
+		}
+
+		// Create Bitbucket client config
+		bitbucketConfig := &bitbucket.Config{
+			BaseURL:    s.config.Bitbucket.BaseURL,
+			Username:   s.config.Bitbucket.Username,
+			Password:   s.config.Bitbucket.Password,
+			Timeout:    s.config.Bitbucket.Timeout,
+			MaxRetries: s.config.Bitbucket.MaxRetries,
+		}
+
+		// Initialize Bitbucket client
+		var err error
+		s.bitbucketClient, err = bitbucket.NewClient(bitbucketConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create Bitbucket client: %w", err)
+		}
+
+		// Initialize git operations with Bitbucket credentials (will be used with CloneRepositoryWithBasicAuth)
+		s.gitOps = git.NewMemoryOperations("") // Empty token, will use basic auth
+
 		// Bitbucket provider: Create GitHub client for migration if credentials are available
 		if configData.GitHubURL != "" && configData.Token != "" {
 			// Create GitHub client for migration support using configData
@@ -368,7 +393,6 @@ func (s *Service) InitializeServiceConfig(configData ConfigData) error {
 			}
 
 			// Initialize GitHub client for migration
-			var err error
 			s.githubClient, err = github.NewClient(githubConfig)
 			if err != nil {
 				s.logger.Warn("Could not create GitHub client for migration support", "error", err)
@@ -381,9 +405,6 @@ func (s *Service) InitializeServiceConfig(configData ConfigData) error {
 			s.logger.Info("No GitHub credentials provided - migration will not be available")
 			s.githubClient = nil
 		}
-
-		// For Bitbucket, git operations will be initialized when needed for specific operations
-		s.gitOps = nil
 	} else {
 		// Unknown provider
 		s.githubClient = nil
@@ -472,13 +493,54 @@ func (s *Service) ValidateConfiguration() error {
 	return s.ValidateAccess()
 }
 
-// ListRepositories retrieves a list of repositories from GitHub
+// ListRepositories retrieves a list of repositories from the configured provider
 func (s *Service) ListRepositories() ([]Repository, error) {
+	ctx := context.Background()
+
+	// Check which provider is configured
+	if s.config.Provider == "bitbucket" {
+		// List Bitbucket repositories
+		if s.bitbucketClient == nil {
+			return nil, fmt.Errorf("Bitbucket client not initialized")
+		}
+
+		var bitbucketRepos []*bitbucket.Repository
+		var err error
+
+		// Get repositories from Bitbucket project
+		if s.config.Bitbucket.Project != "" {
+			bitbucketRepos, err = s.bitbucketClient.ListProjectRepositories(ctx, s.config.Bitbucket.Project)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list Bitbucket project repositories: %w", err)
+			}
+		} else {
+			// Get all accessible repositories
+			bitbucketRepos, err = s.bitbucketClient.ListRepositories(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list Bitbucket repositories: %w", err)
+			}
+		}
+
+		// Convert Bitbucket repositories to GUI format
+		var guiRepos []Repository
+		for _, repo := range bitbucketRepos {
+			guiRepos = append(guiRepos, Repository{
+				Name:     repo.Name,
+				FullName: repo.FullName,
+				CloneURL: repo.CloneURL,
+				SSHURL:   repo.SSHURL,
+				Private:  !repo.Private, // Note: Bitbucket uses "public" field
+				Selected: false,
+			})
+		}
+		return guiRepos, nil
+	}
+
+	// Default to GitHub
 	if s.githubClient == nil {
 		return nil, fmt.Errorf("GitHub client not initialized")
 	}
 
-	ctx := context.Background()
 	var repos []*github.Repository
 	var err error
 
@@ -942,8 +1004,18 @@ func (s *Service) ProcessFileOperations(rules []FileOperationRule, repos []Repos
 		}
 		owner, repoName := parts[0], parts[1]
 
-		// Process repository with file operations
-		result, err := fileProcessor.ProcessRepository(ctx, repo.CloneURL, repo.FullName, options.BranchPrefix, processorRules, options.DryRun, options.DirectPush)
+		// Process repository with file operations - use appropriate clone method based on provider
+		var result *processor.FileProcessResult
+		if s.config.Provider == "bitbucket" && s.config.Bitbucket.Username != "" && s.config.Bitbucket.Password != "" {
+			// For Bitbucket, use basic auth clone
+			result, err = fileProcessor.ProcessRepositoryWithAuth(ctx, repo.CloneURL, repo.FullName,
+				s.config.Bitbucket.Username, s.config.Bitbucket.Password,
+				options.BranchPrefix, processorRules, options.DryRun, options.DirectPush)
+		} else {
+			// For GitHub, use token auth
+			result, err = fileProcessor.ProcessRepository(ctx, repo.CloneURL, repo.FullName,
+				options.BranchPrefix, processorRules, options.DryRun, options.DirectPush)
+		}
 		if err != nil {
 			repoResults = append(repoResults, RepositoryResult{
 				Repository: repo.FullName,
@@ -975,38 +1047,90 @@ func (s *Service) ProcessFileOperations(rules []FileOperationRule, repos []Repos
 		// If not dry run and changes were made, create PR or set commit URL
 		if !options.DryRun && result.Success && len(result.FilesChanged) > 0 {
 			if !options.DirectPush && result.Branch != "" {
-				// Create pull request
-				defaultBranch, err := s.githubClient.GetRepositoryDefaultBranch(ctx, owner, repoName)
-				if err != nil {
-					s.logger.Debug("Failed to get default branch, falling back to 'main'", "repo", repo.FullName, "error", err)
-					defaultBranch = "main"
-				}
+				// Create pull request based on provider
+				if s.config.Provider == "bitbucket" && s.bitbucketClient != nil {
+					// Create Bitbucket pull request
+					projectKey := owner // For Bitbucket, the "owner" is the project key
 
-				prOptions := &github.PullRequestOptions{
-					Title: options.PRTitle,
-					Head:  result.Branch,
-					Base:  defaultBranch,
-					Body:  options.PRBody,
-				}
+					// Get default branch for Bitbucket
+					defaultBranch := "master" // Default fallback
+					bbRepo, err := s.bitbucketClient.GetRepository(ctx, projectKey, repoName)
+					if err == nil && bbRepo != nil {
+						// Try to get default branch from repository
+						// Note: This would need additional API support, for now use master
+						defaultBranch = "master"
+					}
 
-				pr, err := s.githubClient.CreatePullRequest(ctx, owner, repoName, prOptions)
-				if err != nil {
-					repoResult.Message = fmt.Sprintf("File operations applied but failed to create PR: %v", err)
+					prOptions := &bitbucket.PullRequestOptions{
+						Title:       options.PRTitle,
+						Description: options.PRBody,
+						FromRef: bitbucket.Ref{
+							ID: fmt.Sprintf("refs/heads/%s", result.Branch),
+						},
+						ToRef: bitbucket.Ref{
+							ID: fmt.Sprintf("refs/heads/%s", defaultBranch),
+						},
+					}
+
+					pr, err := s.bitbucketClient.CreatePullRequest(ctx, projectKey, repoName, prOptions)
+					if err != nil {
+						repoResult.Message = fmt.Sprintf("File operations applied but failed to create PR: %v", err)
+					} else {
+						// Construct PR URL from Links if available
+						if pr.Links.Self != nil && len(pr.Links.Self) > 0 {
+							repoResult.PRUrl = pr.Links.Self[0].Href
+						} else {
+							// Fallback URL construction
+							repoResult.PRUrl = fmt.Sprintf("%s/projects/%s/repos/%s/pull-requests/%d",
+								s.config.Bitbucket.BaseURL, projectKey, repoName, pr.ID)
+						}
+						repoResult.Message = "File operations applied and PR created"
+					}
+				} else if s.githubClient != nil {
+					// Create GitHub pull request
+					defaultBranch, err := s.githubClient.GetRepositoryDefaultBranch(ctx, owner, repoName)
+					if err != nil {
+						s.logger.Debug("Failed to get default branch, falling back to 'main'", "repo", repo.FullName, "error", err)
+						defaultBranch = "main"
+					}
+
+					prOptions := &github.PullRequestOptions{
+						Title: options.PRTitle,
+						Head:  result.Branch,
+						Base:  defaultBranch,
+						Body:  options.PRBody,
+					}
+
+					pr, err := s.githubClient.CreatePullRequest(ctx, owner, repoName, prOptions)
+					if err != nil {
+						repoResult.Message = fmt.Sprintf("File operations applied but failed to create PR: %v", err)
+					} else {
+						repoResult.PRUrl = pr.GetHTMLURL()
+						repoResult.Message = "File operations applied and PR created"
+					}
 				} else {
-					repoResult.PRUrl = pr.GetHTMLURL()
-					repoResult.Message = "File operations applied and PR created"
+					repoResult.Message = "File operations applied but no PR client available"
 				}
 			} else if options.DirectPush {
 				// Direct push - generate commit URL
 				repoResult.Message = "File operations pushed directly to default branch"
 				if result.CommitHash != "" {
-					baseURL := s.config.GitHub.BaseURL
-					if baseURL == "" || baseURL == "https://api.github.com" {
-						repoResult.CommitURL = fmt.Sprintf("https://github.com/%s/commit/%s", repo.FullName, result.CommitHash)
+					// Generate commit URL based on provider
+					if s.config.Provider == "bitbucket" {
+						// Bitbucket commit URL format
+						projectKey := owner
+						repoResult.CommitURL = fmt.Sprintf("%s/projects/%s/repos/%s/commits/%s",
+							s.config.Bitbucket.BaseURL, projectKey, repoName, result.CommitHash)
 					} else {
-						domain := strings.Replace(baseURL, "/api/v3", "", 1)
-						domain = strings.Replace(domain, "/api", "", 1)
-						repoResult.CommitURL = fmt.Sprintf("%s/%s/commit/%s", domain, repo.FullName, result.CommitHash)
+						// GitHub commit URL format
+						baseURL := s.config.GitHub.BaseURL
+						if baseURL == "" || baseURL == "https://api.github.com" {
+							repoResult.CommitURL = fmt.Sprintf("https://github.com/%s/commit/%s", repo.FullName, result.CommitHash)
+						} else {
+							domain := strings.Replace(baseURL, "/api/v3", "", 1)
+							domain = strings.Replace(domain, "/api", "", 1)
+							repoResult.CommitURL = fmt.Sprintf("%s/%s/commit/%s", domain, repo.FullName, result.CommitHash)
+						}
 					}
 				}
 			}
