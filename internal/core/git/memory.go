@@ -170,17 +170,18 @@ func (mr *MemoryRepository) GetDefaultBranch() (string, error) {
 }
 
 // CommitAndPushToDefault commits changes and pushes directly to the default branch
-func (mr *MemoryRepository) CommitAndPushToDefault(ctx context.Context, commitMessage string) error {
+// Returns the commit hash of the created commit
+func (mr *MemoryRepository) CommitAndPushToDefault(ctx context.Context, commitMessage string) (string, error) {
 	// Get the default branch
 	defaultBranch, err := mr.GetDefaultBranch()
 	if err != nil {
-		return fmt.Errorf("failed to get default branch: %w", err)
+		return "", fmt.Errorf("failed to get default branch: %w", err)
 	}
 
 	// Get the working tree
 	worktree, err := mr.repo.Worktree()
 	if err != nil {
-		return fmt.Errorf("failed to get worktree: %w", err)
+		return "", fmt.Errorf("failed to get worktree: %w", err)
 	}
 
 	// Note: We don't need to checkout the default branch because after clone,
@@ -189,11 +190,11 @@ func (mr *MemoryRepository) CommitAndPushToDefault(ctx context.Context, commitMe
 	// Add all changes to staging area
 	_, err = worktree.Add(".")
 	if err != nil {
-		return fmt.Errorf("failed to add changes: %w", err)
+		return "", fmt.Errorf("failed to add changes: %w", err)
 	}
 
 	// Commit the changes
-	_, err = worktree.Commit(commitMessage, &git.CommitOptions{
+	commitHash, err := worktree.Commit(commitMessage, &git.CommitOptions{
 		Author: &object.Signature{
 			Name:  "GitHub Replace Tool",
 			Email: "go-toolgit@automated.tool",
@@ -201,7 +202,7 @@ func (mr *MemoryRepository) CommitAndPushToDefault(ctx context.Context, commitMe
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to commit changes: %w", err)
+		return "", fmt.Errorf("failed to commit changes: %w", err)
 	}
 
 	// Push directly to the default branch
@@ -213,11 +214,11 @@ func (mr *MemoryRepository) CommitAndPushToDefault(ctx context.Context, commitMe
 		Auth: mr.auth,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to push to %s branch: %w", defaultBranch, err)
+		return "", fmt.Errorf("failed to push to %s branch: %w", defaultBranch, err)
 	}
 
-	log.Printf("[INFO] Successfully pushed changes directly to %s branch", defaultBranch)
-	return nil
+	log.Printf("[INFO] Successfully pushed changes directly to %s branch (commit: %s)", defaultBranch, commitHash.String())
+	return commitHash.String(), nil
 }
 
 // CloneRepositoryWithMirror clones a repository with all branches and tags using basic auth

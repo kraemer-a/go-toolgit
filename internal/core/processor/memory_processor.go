@@ -130,13 +130,14 @@ func (p *MemoryProcessor) ProcessRepositoryWithOptions(ctx context.Context, repo
 
 	if directPush {
 		// Direct push mode: commit and push directly to default branch
-		err = memRepo.CommitAndPushToDefault(ctx, commitMessage)
+		commitHash, err := memRepo.CommitAndPushToDefault(ctx, commitMessage)
 		if err != nil {
 			result.Error = fmt.Errorf("failed to commit and push to default branch: %w", err)
 			return result, result.Error
 		}
-		// No branch name for direct push
+		// No branch name for direct push, but we have the commit hash
 		result.Branch = ""
+		result.CommitHash = commitHash
 	} else {
 		// Pull request mode: create new branch and push
 		branchName := p.gitOps.GenerateBranchName(branchPrefix)

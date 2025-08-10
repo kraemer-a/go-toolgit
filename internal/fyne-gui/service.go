@@ -61,6 +61,7 @@ type RepositoryResult struct {
 	Success      bool     `json:"success"`
 	Message      string   `json:"message"`
 	PRUrl        string   `json:"pr_url,omitempty"`
+	CommitURL    string   `json:"commit_url,omitempty"`
 	FilesChanged []string `json:"files_changed"`
 	Replacements int      `json:"replacements"`
 }
@@ -603,6 +604,24 @@ func (s *Service) ProcessReplacements(rules []ReplacementRule, repos []Repositor
 		} else if !options.DryRun && options.DirectPush && result.Success && len(result.FilesChanged) > 0 {
 			// For direct push, we don't create PR but confirm changes were pushed
 			repoResult.Message = "Changes pushed directly to default branch"
+
+			// Generate commit URL if we have the commit hash
+			if result.CommitHash != "" {
+				// GitHub commit URL format: https://github.com/owner/repo/commit/hash
+				// We need to determine if we're using GitHub.com or GitHub Enterprise
+				baseURL := s.config.GitHub.BaseURL
+				if baseURL == "" || baseURL == "https://api.github.com" {
+					// GitHub.com
+					repoResult.CommitURL = fmt.Sprintf("https://github.com/%s/commit/%s", repo.FullName, result.CommitHash)
+				} else {
+					// GitHub Enterprise - extract domain from API URL
+					// API URL format: https://your-domain/api/v3
+					// Web URL format: https://your-domain/owner/repo/commit/hash
+					domain := strings.Replace(baseURL, "/api/v3", "", 1)
+					domain = strings.Replace(domain, "/api", "", 1) // Some GHE instances use just /api
+					repoResult.CommitURL = fmt.Sprintf("%s/%s/commit/%s", domain, repo.FullName, result.CommitHash)
+				}
+			}
 		}
 
 		// For dry run, generate actual diffs from FileChanges

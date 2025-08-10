@@ -2504,6 +2504,16 @@ func (f *FyneApp) showResultsDialog(result *ProcessingResult) {
 
 			cardContent := container.New(layout.NewVBoxLayout(), resultLabel, prBtn)
 			resultCard = widget.NewCard("", "", cardContent)
+		} else if repoResult.CommitURL != "" {
+			// Add commit link button for direct push
+			commitBtn := widget.NewButtonWithIcon("View Commit", theme.ComputerIcon(), func() {
+				// Open commit URL in browser
+				f.openURL(repoResult.CommitURL)
+			})
+			commitBtn.Importance = widget.HighImportance
+
+			cardContent := container.New(layout.NewVBoxLayout(), resultLabel, commitBtn)
+			resultCard = widget.NewCard("", "", cardContent)
 		} else {
 			resultCard = widget.NewCard("", "", resultLabel)
 		}
