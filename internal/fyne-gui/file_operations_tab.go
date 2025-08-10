@@ -342,10 +342,14 @@ func (f *FyneApp) filterFileOpsRepositories(filter string) {
 
 // selectAllFileOpsRepositories selects or deselects all visible repositories
 func (f *FyneApp) selectAllFileOpsRepositories(selected bool) {
-	for i := range f.fileOpsFilteredRepos {
-		f.fileOpsFilteredRepos[i].Selected = selected
+	// Iterate through the actual UI widgets and call SetChecked to trigger animations and colors
+	for _, obj := range f.fileOpsRepoContainer.Objects {
+		if container, ok := obj.(*fyne.Container); ok {
+			if toggle, ok := container.Objects[0].(*ToggleSwitch); ok {
+				toggle.SetChecked(selected)
+			}
+		}
 	}
-	f.displayFileOpsRepositories()
 }
 
 // updateFileOpsSelectionCount updates the status with selection count
