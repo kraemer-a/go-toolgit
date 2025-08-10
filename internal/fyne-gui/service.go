@@ -8,13 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/viper"
 	"go-toolgit/internal/core/bitbucket"
 	"go-toolgit/internal/core/config"
 	"go-toolgit/internal/core/git"
 	"go-toolgit/internal/core/github"
 	"go-toolgit/internal/core/processor"
 	"go-toolgit/internal/core/utils"
+
+	"github.com/spf13/viper"
 )
 
 // Repository represents a Git repository with selection state
@@ -507,18 +508,14 @@ func (s *Service) ListRepositories() ([]Repository, error) {
 		var bitbucketRepos []*bitbucket.Repository
 		var err error
 
-		// Get repositories from Bitbucket project
-		if s.config.Bitbucket.Project != "" {
-			bitbucketRepos, err = s.bitbucketClient.ListProjectRepositories(ctx, s.config.Bitbucket.Project)
-			if err != nil {
-				return nil, fmt.Errorf("failed to list Bitbucket project repositories: %w", err)
-			}
-		} else {
-			// Get all accessible repositories
-			bitbucketRepos, err = s.bitbucketClient.ListRepositories(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to list Bitbucket repositories: %w", err)
-			}
+		// Get repositories from Bitbucket project (project is required for Bitbucket)
+		if s.config.Bitbucket.Project == "" {
+			return nil, fmt.Errorf("Bitbucket project is required to list repositories")
+		}
+
+		bitbucketRepos, err = s.bitbucketClient.ListProjectRepositories(ctx, s.config.Bitbucket.Project)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list Bitbucket project repositories: %w", err)
 		}
 
 		// Convert Bitbucket repositories to GUI format
@@ -1006,6 +1003,7 @@ func (s *Service) ProcessFileOperations(rules []FileOperationRule, repos []Repos
 
 		// Process repository with file operations - use appropriate clone method based on provider
 		var result *processor.FileProcessResult
+		var err error
 		if s.config.Provider == "bitbucket" && s.config.Bitbucket.Username != "" && s.config.Bitbucket.Password != "" {
 			// For Bitbucket, use basic auth clone
 			result, err = fileProcessor.ProcessRepositoryWithAuth(ctx, repo.CloneURL, repo.FullName,
