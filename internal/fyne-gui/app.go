@@ -1912,7 +1912,7 @@ func (f *FyneApp) collectReplacementRules() []ReplacementRule {
 
 										// Show whole word status in status bar for debugging
 										if wholeWord {
-											f.setStatus(fmt.Sprintf("Rule collected with WHOLE WORD enabled: %s → %s", originalEntry.Text, replacementEntry.Text))
+											f.setStatus(fmt.Sprintf("Rule collected with WHOLE WORD enabled: '%s' to '%s'", originalEntry.Text, replacementEntry.Text))
 										}
 
 										rules = append(rules, ReplacementRule{

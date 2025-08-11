@@ -1167,34 +1167,62 @@ func (s *Service) generateDiffFromFileChange(fileChange *processor.FileChange) s
 	var diff strings.Builder
 
 	// Write file header
-	diff.WriteString(fmt.Sprintf("--- %s (original)\n", fileChange.FilePath))
-	diff.WriteString(fmt.Sprintf("+++ %s (modified)\n", fileChange.FilePath))
+	diff.WriteString(fmt.Sprintf("--- a/%s\n", fileChange.FilePath))
+	diff.WriteString(fmt.Sprintf("+++ b/%s\n", fileChange.FilePath))
 
-	// Generate diff for each change
-	for i, change := range fileChange.StringChanges {
-		// Add hunk header for each change
-		diff.WriteString(fmt.Sprintf("@@ -%d,1 +%d,1 @@ Change %d of %d\n",
-			change.LineNumber, change.LineNumber, i+1, len(fileChange.StringChanges)))
+	// Group changes by line number and generate proper hunks
+	lineGroups := s.groupChangesByLine(fileChange.StringChanges)
 
-		// If we have context, show it first
-		if change.Context != "" {
-			// Show context line with the original string highlighted
-			contextWithOriginal := change.Context
-			diff.WriteString(fmt.Sprintf("- %s\n", contextWithOriginal))
+	for _, group := range lineGroups {
+		// Generate hunk header
+		startLine := group[0].LineNumber
+		lineCount := len(group)
 
-			// Show context line with the replacement string
-			contextWithReplacement := strings.Replace(change.Context, change.Original, change.Replacement, -1)
-			diff.WriteString(fmt.Sprintf("+ %s\n", contextWithReplacement))
-		} else {
-			// No context, just show the raw change
-			diff.WriteString(fmt.Sprintf("- %s\n", change.Original))
-			diff.WriteString(fmt.Sprintf("+ %s\n", change.Replacement))
+		diff.WriteString(fmt.Sprintf("@@ -%d,%d +%d,%d @@\n",
+			startLine, lineCount, startLine, lineCount))
+
+		// Add the actual changes (only show changes with full context)
+		for _, change := range group {
+			if change.Context != "" {
+				// Show the complete line with original content (removed - red)
+				originalLine := change.Context
+				diff.WriteString(fmt.Sprintf("-%s\n", originalLine))
+
+				// Show the complete line with replacement content (added - green)
+				modifiedLine := strings.Replace(change.Context, change.Original, change.Replacement, -1)
+				diff.WriteString(fmt.Sprintf("+%s\n", modifiedLine))
+			}
+			// Skip changes without context - we don't want to show partial strings
 		}
-
-		diff.WriteString("\n")
 	}
 
 	return diff.String()
+}
+
+// groupChangesByLine groups string changes by line number for better diff generation
+func (s *Service) groupChangesByLine(changes []processor.StringChange) [][]processor.StringChange {
+	if len(changes) == 0 {
+		return nil
+	}
+
+	var groups [][]processor.StringChange
+	currentGroup := []processor.StringChange{changes[0]}
+
+	for i := 1; i < len(changes); i++ {
+		// If changes are on the same or adjacent lines, group them together
+		if changes[i].LineNumber <= currentGroup[len(currentGroup)-1].LineNumber+1 {
+			currentGroup = append(currentGroup, changes[i])
+		} else {
+			// Start a new group
+			groups = append(groups, currentGroup)
+			currentGroup = []processor.StringChange{changes[i]}
+		}
+	}
+
+	// Add the last group
+	groups = append(groups, currentGroup)
+
+	return groups
 }
 
 // setDefaults sets default configuration values

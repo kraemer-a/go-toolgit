@@ -329,7 +329,7 @@ func (e *ReplacementEngine) findChanges(content string, rule ReplacementRule) []
 			if len(indices) > i {
 				// Create context showing the change
 				start, end := indices[i][0], indices[i][1]
-				contextLine = line[:start] + "[" + match + " -> " + rule.Replacement + "]" + line[end:]
+				contextLine = line[:start] + match + line[end:]
 			}
 
 			changes = append(changes, StringChange{
