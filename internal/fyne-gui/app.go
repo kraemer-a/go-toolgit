@@ -1438,6 +1438,7 @@ func (f *FyneApp) showLoading(message string) {
 // hideLoading hides the loading spinner
 func (f *FyneApp) hideLoading() {
 	fyne.Do(func() {
+		f.loadingOverlay.DisableProgress() // Disable progress bar
 		f.loadingOverlay.Stop()
 	})
 }
@@ -1687,7 +1688,10 @@ func (f *FyneApp) handleReplacementDryRun() {
 		return
 	}
 
-	f.showLoading("Analyzing repositories using Git cloning (no API limits consumed)...")
+	f.showLoading("Analyzing repositories using Git cloning...")
+
+	// Enable progress tracking for dry run
+	f.loadingOverlay.EnableProgress()
 
 	options := ProcessingOptions{
 		DryRun:          true,
@@ -1700,7 +1704,17 @@ func (f *FyneApp) handleReplacementDryRun() {
 	}
 
 	go func() {
-		result, err := f.service.ProcessReplacements(rules, repos, options)
+		// Create progress callback for dry run
+		progressCallback := func(current, total int, repoName, status string) {
+			// Use "Analyzing" for dry run processing stage
+			if status == "Processing..." {
+				status = "Analyzing..."
+			}
+			message := fmt.Sprintf("%s: %s", repoName, status)
+			f.loadingOverlay.SetProgress(current, total, message)
+		}
+
+		result, err := f.service.ProcessReplacementsWithProgress(rules, repos, options, progressCallback)
 		f.hideLoading()
 
 		if err != nil {
@@ -2491,17 +2505,26 @@ func (f *FyneApp) applyChanges(rules []ReplacementRule, repos []Repository, opti
 	options.DirectPush = isDirectPush // Ensure options has the current DirectPush state
 
 	// Since we only receive repositories with changes, we can process directly
-	actionMessage := "Applying changes to %d repository(ies)..."
+	actionMessage := "Applying changes to repository(ies)..."
 	if isDirectPush {
-		actionMessage = "Pushing changes directly to default branch in %d repository(ies)..."
+		actionMessage = "Pushing changes directly to default branch..."
 	}
-	f.setStatus(fmt.Sprintf(actionMessage, len(repos)))
-	f.showLoading(fmt.Sprintf(actionMessage, len(repos)))
+	f.setStatus(fmt.Sprintf(actionMessage))
+	f.showLoading(fmt.Sprintf(actionMessage))
+
+	// Enable progress tracking
+	f.loadingOverlay.EnableProgress()
 
 	go func() {
-		// Process the repositories (all of which have changes)
+		// Create progress callback that updates the loading container
+		progressCallback := func(current, total int, repoName, status string) {
+			message := fmt.Sprintf("%s: %s", repoName, status)
+			f.loadingOverlay.SetProgress(current, total, message)
+		}
+
+		// Process the repositories (all of which have changes) with progress tracking
 		options.DryRun = false
-		result, err := f.service.ProcessReplacements(rules, repos, options)
+		result, err := f.service.ProcessReplacementsWithProgress(rules, repos, options, progressCallback)
 		if err != nil {
 			f.hideLoading()
 			f.setStatusError(fmt.Sprintf("Processing failed: %v", err))

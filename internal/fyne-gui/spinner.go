@@ -1,6 +1,7 @@
 package fynegui
 
 import (
+	"fmt"
 	"image/color"
 	"math"
 	"time"
@@ -85,7 +86,7 @@ func (s *AnimatedSpinner) createCirclesRenderer() fyne.WidgetRenderer {
 		x := centerX + float32(math.Cos(angle))*radius
 		y := centerY + float32(math.Sin(angle))*radius
 
-		circle := canvas.NewCircle(color.RGBA{66, 165, 245, 255}) // Blue color
+		circle := canvas.NewCircle(color.RGBA{255, 255, 255, 255}) // Pure white for Adwaita theme visibility
 		circle.StrokeWidth = 0
 		circle.Resize(fyne.NewSize(circleRadius*2, circleRadius*2))
 		circle.Move(fyne.NewPos(x-circleRadius, y-circleRadius))
@@ -113,7 +114,7 @@ func (s *AnimatedSpinner) createDotsRenderer() fyne.WidgetRenderer {
 	for i := 0; i < numDots; i++ {
 		x := startX + float32(i)*spacing
 
-		dot := canvas.NewCircle(color.RGBA{98, 114, 164, 255})
+		dot := canvas.NewCircle(color.RGBA{255, 255, 255, 255}) // Pure white for Adwaita theme visibility
 		dot.StrokeWidth = 0
 		dot.Resize(fyne.NewSize(dotSize*2, dotSize*2))
 		dot.Move(fyne.NewPos(x, y-dotSize))
@@ -141,7 +142,7 @@ func (s *AnimatedSpinner) createBarsRenderer() fyne.WidgetRenderer {
 	for i := 0; i < numBars; i++ {
 		x := startX + float32(i)*spacing
 
-		bar := canvas.NewRectangle(color.RGBA{139, 233, 253, 255})
+		bar := canvas.NewRectangle(color.RGBA{255, 255, 255, 255}) // Pure white for Adwaita theme visibility
 		bar.CornerRadius = barWidth / 2
 		bar.Resize(fyne.NewSize(barWidth, barMaxHeight/2))
 		bar.Move(fyne.NewPos(x, (s.size-barMaxHeight/2)/2))
@@ -161,7 +162,7 @@ func (s *AnimatedSpinner) createPulseRenderer() fyne.WidgetRenderer {
 	objects := make([]fyne.CanvasObject, 2)
 
 	for i := 0; i < 2; i++ {
-		circle := canvas.NewCircle(color.RGBA{189, 147, 249, 255})
+		circle := canvas.NewCircle(color.RGBA{255, 255, 255, 255}) // Pure white for Adwaita theme visibility
 		circle.StrokeWidth = 0
 		circle.Resize(fyne.NewSize(s.size*0.8, s.size*0.8))
 		circle.Move(fyne.NewPos(s.size*0.1, s.size*0.1))
@@ -204,10 +205,10 @@ func (s *AnimatedSpinner) startCirclesAnimation() {
 		for i, circle := range s.circles {
 			// Calculate opacity based on position in the rotation
 			phase := math.Mod(elapsed*2+float64(i)*0.125, 1.0)
-			opacity := uint8(100 + 155*math.Sin(phase*math.Pi))
+			opacity := uint8(180 + 75*math.Sin(phase*math.Pi)) // Higher minimum opacity for Adwaita visibility
 
 			// Update circle color with new opacity
-			circle.FillColor = color.RGBA{66, 165, 245, opacity}
+			circle.FillColor = color.RGBA{255, 255, 255, opacity}
 			circle.Refresh()
 		}
 	})
@@ -235,9 +236,9 @@ func (s *AnimatedSpinner) startDotsAnimation() {
 			currentPos := dot.Position()
 			dot.Move(fyne.NewPos(currentPos.X, y))
 
-			// Also animate opacity
-			opacity := uint8(100 + 155*bounce)
-			dot.FillColor = color.RGBA{98, 114, 164, opacity}
+			// Also animate opacity - higher minimum for better visibility on dark backgrounds
+			opacity := uint8(180 + 75*bounce) // Range: 180-255 instead of 100-255 for better Adwaita visibility
+			dot.FillColor = color.RGBA{255, 255, 255, opacity}
 			dot.Refresh()
 		}
 	})
@@ -267,9 +268,9 @@ func (s *AnimatedSpinner) startBarsAnimation() {
 			bar.Resize(fyne.NewSize(barWidth, height))
 			bar.Move(fyne.NewPos(currentPos.X, (s.size-height)/2))
 
-			// Animate color brightness
-			brightness := uint8(200 + 55*heightFactor)
-			bar.FillColor = color.RGBA{brightness, 233, 253, 255}
+			// Animate opacity for better Adwaita visibility
+			opacity := uint8(180 + 75*heightFactor) // Higher minimum opacity
+			bar.FillColor = color.RGBA{255, 255, 255, opacity}
 			bar.Refresh()
 		}
 	})
@@ -289,19 +290,19 @@ func (s *AnimatedSpinner) startPulseAnimation() {
 			phase := math.Mod(elapsed+float64(i)*0.5, 1.5)
 
 			if phase < 1.0 {
-				// Expand and fade
+				// Expand and fade - but maintain higher minimum opacity for Adwaita
 				scale := 1.0 + phase*0.5
-				opacity := uint8(255 * (1 - phase))
+				opacity := uint8(255 * (1 - phase*0.7)) // Slower fade, higher minimum
 
 				size := s.size * 0.8 * float32(scale)
 				pos := (s.size - size) / 2
 
 				circle.Resize(fyne.NewSize(size, size))
 				circle.Move(fyne.NewPos(pos, pos))
-				circle.FillColor = color.RGBA{189, 147, 249, opacity}
+				circle.FillColor = color.RGBA{255, 255, 255, opacity}
 			} else {
 				// Reset for next pulse
-				circle.FillColor = color.RGBA{189, 147, 249, 0}
+				circle.FillColor = color.RGBA{255, 255, 255, 0}
 			}
 
 			circle.Refresh()
@@ -330,9 +331,12 @@ func (s *AnimatedSpinner) MinSize() fyne.Size {
 type LoadingContainer struct {
 	widget.BaseWidget
 
-	spinner   *AnimatedSpinner
-	label     *widget.Label
-	container *fyne.Container
+	spinner      *AnimatedSpinner
+	label        *widget.Label
+	progressBar  *widget.ProgressBar
+	background   *canvas.Rectangle
+	container    *fyne.Container
+	showProgress bool
 }
 
 // NewLoadingContainer creates a new loading container with spinner and message
@@ -340,13 +344,28 @@ func NewLoadingContainer(message string) *LoadingContainer {
 	l := &LoadingContainer{}
 	l.ExtendBaseWidget(l)
 
+	// Create semi-transparent dark background for overlay effect
+	l.background = canvas.NewRectangle(color.RGBA{0, 0, 0, 180}) // Semi-transparent black
+
 	l.spinner = NewAnimatedSpinnerWithStyle(SpinnerStyleDots)
 	l.label = widget.NewLabel(message)
 	l.label.Alignment = fyne.TextAlignCenter
+	l.progressBar = widget.NewProgressBar()
+	l.progressBar.Hide() // Hidden by default
+	l.showProgress = false
 
-	l.container = container.NewVBox(
+	// Content container with spinner and text
+	contentContainer := container.NewVBox(
 		container.NewCenter(l.spinner),
+		container.NewCenter(l.progressBar),
 		container.NewCenter(l.label),
+	)
+
+	// Layer the background behind the content using a Max layout
+	// Max layout ensures both background and content fill the entire space
+	l.container = container.NewMax(
+		l.background,     // Background layer (fills entire space)
+		contentContainer, // Content layer (centered on top)
 	)
 
 	return l
@@ -377,4 +396,37 @@ func (l *LoadingContainer) Stop() {
 // SetMessage updates the loading message
 func (l *LoadingContainer) SetMessage(message string) {
 	l.label.SetText(message)
+}
+
+// EnableProgress enables the progress bar display
+func (l *LoadingContainer) EnableProgress() {
+	fyne.Do(func() {
+		l.showProgress = true
+		l.progressBar.Show()
+		l.progressBar.SetValue(0.0)
+		l.Refresh()
+	})
+}
+
+// DisableProgress disables the progress bar display
+func (l *LoadingContainer) DisableProgress() {
+	fyne.Do(func() {
+		l.showProgress = false
+		l.progressBar.Hide()
+		l.Refresh()
+	})
+}
+
+// SetProgress updates the progress bar and message
+func (l *LoadingContainer) SetProgress(current, total int, message string) {
+	if l.showProgress && total > 0 {
+		fyne.Do(func() {
+			progress := float64(current) / float64(total)
+			l.progressBar.SetValue(progress)
+
+			// Format message with progress
+			progressMsg := fmt.Sprintf("%s (%d/%d)", message, current, total)
+			l.label.SetText(progressMsg)
+		})
+	}
 }

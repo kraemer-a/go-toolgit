@@ -147,6 +147,9 @@ type MigrationResult struct {
 // RateLimitInfo contains GitHub API rate limit information
 type RateLimitInfo = github.RateLimitInfo
 
+// ProgressCallback represents a callback function for progress updates
+type ProgressCallback func(current, total int, repoName, status string)
+
 // Service provides the business logic for the Fyne GUI
 type Service struct {
 	config          *config.Config
@@ -717,6 +720,193 @@ func (s *Service) ProcessReplacements(rules []ReplacementRule, repos []Repositor
 			if len(fileDiffs) > 0 {
 				diffs[repo.FullName] = fileDiffs
 			}
+		}
+
+		repoResults = append(repoResults, repoResult)
+		if result.Success {
+			successCount++
+		}
+	}
+
+	// Create overall result
+	overallSuccess := successCount == len(repos)
+	message := fmt.Sprintf("Processed %d repositories, %d successful", len(repos), successCount)
+
+	return &ProcessingResult{
+		Success:           overallSuccess,
+		Message:           message,
+		RepositoryResults: repoResults,
+		Diffs:             diffs,
+	}, nil
+}
+
+// ProcessReplacementsWithProgress processes string replacements across repositories with progress callback
+func (s *Service) ProcessReplacementsWithProgress(rules []ReplacementRule, repos []Repository, options ProcessingOptions, progressCallback ProgressCallback) (*ProcessingResult, error) {
+	if s.engine == nil || s.gitOps == nil || s.githubClient == nil {
+		return nil, fmt.Errorf("service components not initialized")
+	}
+
+	ctx := context.Background()
+
+	// Convert GUI rules to processor rules
+	var engineRules []processor.ReplacementRule
+	for _, rule := range rules {
+		engineRules = append(engineRules, processor.ReplacementRule{
+			Original:      rule.Original,
+			Replacement:   rule.Replacement,
+			Regex:         rule.Regex,
+			CaseSensitive: rule.CaseSensitive,
+			WholeWord:     rule.WholeWord,
+		})
+	}
+
+	// Create a new replacement engine with the rules
+	engine, err := processor.NewReplacementEngine(engineRules, options.IncludePatterns, options.ExcludePatterns)
+	if err != nil {
+		return &ProcessingResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create replacement engine: %v", err),
+		}, nil
+	}
+
+	// Create memory processor for efficient git operations
+	memoryProcessor := processor.NewMemoryProcessor(engine, s.gitOps)
+
+	// Process each repository with progress tracking
+	var repoResults []RepositoryResult
+	diffs := make(map[string]map[string]string)
+	successCount := 0
+	totalRepos := len(repos)
+
+	for i, repo := range repos {
+		current := i + 1
+
+		// Report progress: starting repository
+		if progressCallback != nil {
+			progressCallback(current, totalRepos, repo.FullName, "Starting...")
+		}
+
+		// Parse owner/repo from full name
+		parts := strings.SplitN(repo.FullName, "/", 2)
+		if len(parts) != 2 {
+			repoResults = append(repoResults, RepositoryResult{
+				Repository: repo.FullName,
+				Success:    false,
+				Message:    "Invalid repository name format",
+			})
+			continue
+		}
+		owner, repoName := parts[0], parts[1]
+
+		// Report progress: cloning
+		if progressCallback != nil {
+			progressCallback(current, totalRepos, repo.FullName, "Cloning...")
+		}
+
+		// Process repository using memory-based git operations with DirectPush option
+		result, err := memoryProcessor.ProcessRepositoryWithOptions(ctx, repo.CloneURL, repo.FullName, options.BranchPrefix, options.DryRun, options.DirectPush)
+		if err != nil {
+			repoResults = append(repoResults, RepositoryResult{
+				Repository: repo.FullName,
+				Success:    false,
+				Message:    fmt.Sprintf("Processing failed: %v", err),
+			})
+			continue
+		}
+
+		// Report progress: processing
+		if progressCallback != nil {
+			progressCallback(current, totalRepos, repo.FullName, "Processing...")
+		}
+
+		// Create repository result
+		repoResult := RepositoryResult{
+			Repository:   result.Repository,
+			Success:      result.Success,
+			Message:      "Processing completed successfully",
+			FilesChanged: result.FilesChanged,
+			Replacements: result.Replacements,
+		}
+
+		if result.Error != nil {
+			repoResult.Success = false
+			repoResult.Message = result.Error.Error()
+		}
+
+		// If not dry run and changes were made, create PR (only if not direct push)
+		if !options.DryRun && !options.DirectPush && result.Success && len(result.FilesChanged) > 0 && result.Branch != "" {
+			// Report progress: creating PR
+			if progressCallback != nil {
+				progressCallback(current, totalRepos, repo.FullName, "Creating PR...")
+			}
+
+			// Get the actual default branch for this repository
+			defaultBranch, err := s.githubClient.GetRepositoryDefaultBranch(ctx, owner, repoName)
+			if err != nil {
+				// Fallback to main if we can't get the default branch
+				s.logger.Debug("Failed to get default branch, falling back to 'main'", "repo", repo.FullName, "error", err)
+				defaultBranch = "main"
+			}
+
+			prOptions := &github.PullRequestOptions{
+				Title: options.PRTitle,
+				Head:  result.Branch,
+				Base:  defaultBranch,
+				Body:  options.PRBody,
+			}
+
+			pr, err := s.githubClient.CreatePullRequest(ctx, owner, repoName, prOptions)
+			if err != nil {
+				repoResult.Message = fmt.Sprintf("Changes applied but failed to create PR: %v", err)
+			} else {
+				repoResult.PRUrl = pr.GetHTMLURL()
+				repoResult.Message = "Changes applied and PR created"
+			}
+		} else if !options.DryRun && options.DirectPush && result.Success && len(result.FilesChanged) > 0 {
+			// Report progress: pushing
+			if progressCallback != nil {
+				progressCallback(current, totalRepos, repo.FullName, "Pushing...")
+			}
+
+			// For direct push, we don't create PR but confirm changes were pushed
+			repoResult.Message = "Changes pushed directly to default branch"
+
+			// Generate commit URL if we have the commit hash
+			if result.CommitHash != "" {
+				// GitHub commit URL format: https://github.com/owner/repo/commit/hash
+				// We need to determine if we're using GitHub.com or GitHub Enterprise
+				baseURL := s.config.GitHub.BaseURL
+				if baseURL == "" || baseURL == "https://api.github.com" {
+					// GitHub.com
+					repoResult.CommitURL = fmt.Sprintf("https://github.com/%s/commit/%s", repo.FullName, result.CommitHash)
+				} else {
+					// GitHub Enterprise - extract domain from API URL
+					// API URL format: https://your-domain/api/v3
+					// Web URL format: https://your-domain/owner/repo/commit/hash
+					domain := strings.Replace(baseURL, "/api/v3", "", 1)
+					domain = strings.Replace(domain, "/api", "", 1) // Some GHE instances use just /api
+					repoResult.CommitURL = fmt.Sprintf("%s/%s/commit/%s", domain, repo.FullName, result.CommitHash)
+				}
+			}
+		}
+
+		// For dry run, generate actual diffs from FileChanges
+		if options.DryRun && len(result.FileChanges) > 0 {
+			fileDiffs := make(map[string]string)
+			for _, fileChange := range result.FileChanges {
+				diff := s.generateDiffFromFileChange(fileChange)
+				if diff != "" {
+					fileDiffs[fileChange.FilePath] = diff
+				}
+			}
+			if len(fileDiffs) > 0 {
+				diffs[repo.FullName] = fileDiffs
+			}
+		}
+
+		// Report progress: completed
+		if progressCallback != nil {
+			progressCallback(current, totalRepos, repo.FullName, "Complete")
 		}
 
 		repoResults = append(repoResults, repoResult)
