@@ -268,9 +268,9 @@ func (f *FyneApp) setupUI() {
 	// Create main tabs with icons
 	f.currentTab = container.NewAppTabs(
 		container.NewTabItemWithIcon("Configuration", theme.SettingsIcon(), f.createConfigTab()),
+		container.NewTabItemWithIcon("Repository Migration", theme.UploadIcon(), f.createMigrationTab()),
 		container.NewTabItemWithIcon("String Replacement", theme.DocumentCreateIcon(), f.createReplacementTab()),
 		container.NewTabItemWithIcon("File Operations", theme.FolderOpenIcon(), f.createFileOperationsTab()),
-		container.NewTabItemWithIcon("Repository Migration", theme.UploadIcon(), f.createMigrationTab()),
 	)
 
 	// Enhanced status bar with icon and rate limit status
