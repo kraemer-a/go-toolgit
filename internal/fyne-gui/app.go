@@ -2050,10 +2050,26 @@ func (f *FyneApp) showDiffPreview(diffs map[string]map[string]string, rules []Re
 	diffScroll := container.NewScroll(diffContent)
 	diffScroll.SetMinSize(fyne.NewSize(950, 400))
 
+	// Filter repositories to only include those with actual changes
+	var reposWithChanges []Repository
+	repoMap := make(map[string]Repository)
+
+	// Create a map for quick repository lookup
+	for _, repo := range repos {
+		repoMap[repo.FullName] = repo
+	}
+
+	// Only include repositories that have diffs
+	for repoName := range diffs {
+		if repo, exists := repoMap[repoName]; exists {
+			reposWithChanges = append(reposWithChanges, repo)
+		}
+	}
+
 	// Create action buttons
 	applyBtn := widget.NewButtonWithIcon("Apply Changes", theme.ConfirmIcon(), func() {
 		diffWindow.Close()
-		f.applyChanges(rules, repos, options)
+		f.applyChanges(rules, reposWithChanges, options) // Pass only repositories with changes
 	})
 	applyBtn.Importance = widget.HighImportance
 
@@ -2474,73 +2490,18 @@ func (f *FyneApp) applyChanges(rules []ReplacementRule, repos []Repository, opti
 	isDirectPush := f.pushDirectToggle.Checked
 	options.DirectPush = isDirectPush // Ensure options has the current DirectPush state
 
-	loadingMessage := "Applying changes and creating pull requests..."
+	// Since we only receive repositories with changes, we can process directly
+	actionMessage := "Applying changes to %d repository(ies)..."
 	if isDirectPush {
-		loadingMessage = "Applying changes and pushing directly to default branch..."
+		actionMessage = "Pushing changes directly to default branch in %d repository(ies)..."
 	}
-	f.setStatus(loadingMessage)
-	f.showLoading(loadingMessage)
+	f.setStatus(fmt.Sprintf(actionMessage, len(repos)))
+	f.showLoading(fmt.Sprintf(actionMessage, len(repos)))
 
 	go func() {
-		// First, run a dry run to determine which repositories have changes
-		dryRunOptions := options
-		dryRunOptions.DryRun = true
-
-		dryResult, err := f.service.ProcessReplacements(rules, repos, dryRunOptions)
-		if err != nil {
-			f.hideLoading()
-			f.setStatusError(fmt.Sprintf("Pre-processing check failed: %v", err))
-			return
-		}
-
-		// Increment API call counter for dry run processing (pre-processing check)
-		for range repos {
-			f.operationStatus.IncrementAPICall() // Repository access/clone for dry run
-		}
-
-		// Filter repositories to only include those with actual changes
-		var reposWithChanges []Repository
-		repoMap := make(map[string]Repository)
-
-		// Create a map for quick repository lookup
-		for _, repo := range repos {
-			repoMap[repo.FullName] = repo
-		}
-
-		// Check which repositories have actual changes
-		if dryResult.Diffs != nil {
-			for repoName, repoDiffs := range dryResult.Diffs {
-				hasChanges := false
-				for _, fileDiff := range repoDiffs {
-					if strings.TrimSpace(fileDiff) != "" {
-						hasChanges = true
-						break
-					}
-				}
-
-				if hasChanges {
-					if repo, exists := repoMap[repoName]; exists {
-						reposWithChanges = append(reposWithChanges, repo)
-					}
-				}
-			}
-		}
-
-		if len(reposWithChanges) == 0 {
-			f.hideLoading()
-			f.setStatus("No changes found to apply")
-			return
-		}
-
-		actionMessage := "Applying changes to %d repository(ies) with actual changes..."
-		if isDirectPush {
-			actionMessage = "Pushing changes directly to default branch in %d repository(ies)..."
-		}
-		f.setStatus(fmt.Sprintf(actionMessage, len(reposWithChanges)))
-
-		// Now process only repositories with changes
+		// Process the repositories (all of which have changes)
 		options.DryRun = false
-		result, err := f.service.ProcessReplacements(rules, reposWithChanges, options)
+		result, err := f.service.ProcessReplacements(rules, repos, options)
 		if err != nil {
 			f.hideLoading()
 			f.setStatusError(fmt.Sprintf("Processing failed: %v", err))
@@ -2550,7 +2511,7 @@ func (f *FyneApp) applyChanges(rules []ReplacementRule, repos []Repository, opti
 		// Increment API call counter for actual processing
 		if !isDirectPush {
 			// Only count PR creation for non-direct push
-			for range reposWithChanges {
+			for range repos {
 				f.operationStatus.IncrementAPICall() // Pull request creation
 			}
 		}
