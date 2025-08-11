@@ -165,6 +165,12 @@ func NewService(cfg *config.Config, logger *utils.Logger) *Service {
 	}
 }
 
+// SetActiveProvider updates the active provider for operations
+func (s *Service) SetActiveProvider(provider string) {
+	s.logger.Info("Setting active provider", "provider", provider)
+	s.config.Provider = provider
+}
+
 // SaveConfig saves the current configuration to disk with automatic encryption
 func (s *Service) SaveConfig(configData ConfigData) error {
 	s.logger.Debug("SaveConfig called", "provider", configData.Provider)

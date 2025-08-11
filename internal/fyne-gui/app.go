@@ -447,6 +447,8 @@ func (f *FyneApp) createConfigTab() *fyne.Container {
 		if selected == "Use GitHub" {
 			f.providerSelect.Selected = "Use GitHub"
 			f.logger.Info("Provider selected", "provider", "github")
+			// Update the service to use GitHub
+			f.service.SetActiveProvider("github")
 			// Update File Operations tab indicator if it exists
 			if f.fileOpsProviderRadio != nil {
 				f.fileOpsProviderRadio.SetSelected("GitHub")
@@ -454,6 +456,8 @@ func (f *FyneApp) createConfigTab() *fyne.Container {
 		} else if selected == "Use Bitbucket" {
 			f.providerSelect.Selected = "Use Bitbucket"
 			f.logger.Info("Provider selected", "provider", "bitbucket")
+			// Update the service to use Bitbucket
+			f.service.SetActiveProvider("bitbucket")
 			// Update File Operations tab indicator if it exists
 			if f.fileOpsProviderRadio != nil {
 				f.fileOpsProviderRadio.SetSelected("Bitbucket")
