@@ -184,6 +184,14 @@ func (f *FyneApp) createFileOperationsRightColumn() *fyne.Container {
 				f.providerSelect.SetSelected("Use Bitbucket")
 			}
 		}
+		// Update String Replacement tab indicator if it exists
+		if f.stringReplaceProviderRadio != nil {
+			if selected == "GitHub" {
+				f.stringReplaceProviderRadio.SetSelected("GitHub")
+			} else if selected == "Bitbucket" {
+				f.stringReplaceProviderRadio.SetSelected("Bitbucket")
+			}
+		}
 		f.logger.Info("Provider changed from File Operations tab", "provider", selected)
 	})
 	f.fileOpsProviderRadio.Horizontal = true

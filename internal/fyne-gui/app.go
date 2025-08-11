@@ -119,6 +119,9 @@ type FyneApp struct {
 	fileOpsPRSettingsContainer   *fyne.Container
 	fileOpsProviderRadio         *widget.RadioGroup
 
+	// String replacement provider selection
+	stringReplaceProviderRadio *widget.RadioGroup
+
 	// Migration widgets
 	sourceURLEntry             *widget.Entry
 	targetOrgEntry             *widget.Entry
@@ -453,6 +456,10 @@ func (f *FyneApp) createConfigTab() *fyne.Container {
 			if f.fileOpsProviderRadio != nil {
 				f.fileOpsProviderRadio.SetSelected("GitHub")
 			}
+			// Update String Replacement tab indicator if it exists
+			if f.stringReplaceProviderRadio != nil {
+				f.stringReplaceProviderRadio.SetSelected("GitHub")
+			}
 		} else if selected == "Use Bitbucket" {
 			f.providerSelect.Selected = "Use Bitbucket"
 			f.logger.Info("Provider selected", "provider", "bitbucket")
@@ -461,6 +468,10 @@ func (f *FyneApp) createConfigTab() *fyne.Container {
 			// Update File Operations tab indicator if it exists
 			if f.fileOpsProviderRadio != nil {
 				f.fileOpsProviderRadio.SetSelected("Bitbucket")
+			}
+			// Update String Replacement tab indicator if it exists
+			if f.stringReplaceProviderRadio != nil {
+				f.stringReplaceProviderRadio.SetSelected("Bitbucket")
 			}
 		}
 	})
@@ -562,6 +573,40 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 	f.repoSelectionContainer = container.New(layout.NewVBoxLayout())
 	repoScroll := container.NewScroll(f.repoSelectionContainer)
 
+	// Provider selection radio (active selection)
+	f.stringReplaceProviderRadio = widget.NewRadioGroup([]string{"GitHub", "Bitbucket"}, func(selected string) {
+		// Update the service to use the selected provider
+		if selected == "GitHub" {
+			f.service.SetActiveProvider("github")
+		} else if selected == "Bitbucket" {
+			f.service.SetActiveProvider("bitbucket")
+		}
+		// Update the main provider selection in Configuration tab
+		if f.providerSelect != nil {
+			if selected == "GitHub" {
+				f.providerSelect.SetSelected("Use GitHub")
+			} else if selected == "Bitbucket" {
+				f.providerSelect.SetSelected("Use Bitbucket")
+			}
+		}
+		// Update File Operations tab indicator if it exists
+		if f.fileOpsProviderRadio != nil {
+			if selected == "GitHub" {
+				f.fileOpsProviderRadio.SetSelected("GitHub")
+			} else if selected == "Bitbucket" {
+				f.fileOpsProviderRadio.SetSelected("Bitbucket")
+			}
+		}
+		f.logger.Info("Provider changed from String Replacement tab", "provider", selected)
+	})
+	f.stringReplaceProviderRadio.Horizontal = true
+	// Set initial selection based on current provider
+	if f.providerSelect != nil && f.providerSelect.Selected == "Use Bitbucket" {
+		f.stringReplaceProviderRadio.SetSelected("Bitbucket")
+	} else {
+		f.stringReplaceProviderRadio.SetSelected("GitHub")
+	}
+
 	loadReposBtn := widget.NewButtonWithIcon("🔄 Load Repositories", theme.DownloadIcon(), f.handleLoadRepositories)
 	loadReposBtn.Importance = widget.HighImportance
 
@@ -586,6 +631,15 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 	selectAllBtn := widget.NewButton("Select All", f.handleSelectAllRepos)
 	deselectAllBtn := widget.NewButton("Deselect All", f.handleDeselectAllRepos)
 
+	// Provider indicator section
+	providerLabel := widget.NewLabel("Active Provider:")
+	providerLabel.TextStyle = fyne.TextStyle{Bold: true}
+	providerSection := container.New(layout.NewHBoxLayout(),
+		providerLabel,
+		f.stringReplaceProviderRadio,
+		layout.NewSpacer(),
+	)
+
 	// Create prominent load button section
 	loadSection := container.New(layout.NewHBoxLayout(),
 		loadReposBtn,
@@ -600,6 +654,7 @@ func (f *FyneApp) createReplacementTab() *fyne.Container {
 	)
 
 	repoButtons := container.New(layout.NewVBoxLayout(),
+		providerSection,
 		loadSection,
 		selectionButtons,
 		widget.NewSeparator(),
