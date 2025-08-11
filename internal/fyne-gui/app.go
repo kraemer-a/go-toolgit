@@ -117,6 +117,7 @@ type FyneApp struct {
 	fileOpsPRBodyEntry           *widget.Entry
 	fileOpsBranchPrefixEntry     *widget.Entry
 	fileOpsPRSettingsContainer   *fyne.Container
+	fileOpsProviderRadio         *widget.RadioGroup
 
 	// Migration widgets
 	sourceURLEntry             *widget.Entry
@@ -446,9 +447,17 @@ func (f *FyneApp) createConfigTab() *fyne.Container {
 		if selected == "Use GitHub" {
 			f.providerSelect.Selected = "Use GitHub"
 			f.logger.Info("Provider selected", "provider", "github")
+			// Update File Operations tab indicator if it exists
+			if f.fileOpsProviderRadio != nil {
+				f.fileOpsProviderRadio.SetSelected("GitHub")
+			}
 		} else if selected == "Use Bitbucket" {
 			f.providerSelect.Selected = "Use Bitbucket"
 			f.logger.Info("Provider selected", "provider", "bitbucket")
+			// Update File Operations tab indicator if it exists
+			if f.fileOpsProviderRadio != nil {
+				f.fileOpsProviderRadio.SetSelected("Bitbucket")
+			}
 		}
 	})
 	f.providerSelect.SetSelected("Use GitHub")

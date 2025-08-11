@@ -168,6 +168,26 @@ func (f *FyneApp) createFileOperationsLeftColumn() *container.Scroll {
 // createFileOperationsRightColumn creates the right column with repository selection
 func (f *FyneApp) createFileOperationsRightColumn() *fyne.Container {
 
+	// Provider selection radio (active selection)
+	f.fileOpsProviderRadio = widget.NewRadioGroup([]string{"GitHub", "Bitbucket"}, func(selected string) {
+		// Update the main provider selection in Configuration tab
+		if f.providerSelect != nil {
+			if selected == "GitHub" {
+				f.providerSelect.SetSelected("Use GitHub")
+			} else if selected == "Bitbucket" {
+				f.providerSelect.SetSelected("Use Bitbucket")
+			}
+		}
+		f.logger.Info("Provider changed from File Operations tab", "provider", selected)
+	})
+	f.fileOpsProviderRadio.Horizontal = true
+	// Set initial selection based on current provider
+	if f.providerSelect != nil && f.providerSelect.Selected == "Use Bitbucket" {
+		f.fileOpsProviderRadio.SetSelected("Bitbucket")
+	} else {
+		f.fileOpsProviderRadio.SetSelected("GitHub")
+	}
+
 	// Load repositories button
 	loadReposBtn := widget.NewButtonWithIcon("Load Repositories", theme.DownloadIcon(), func() {
 		f.handleFileOpsLoadRepositories()
@@ -191,6 +211,15 @@ func (f *FyneApp) createFileOperationsRightColumn() *fyne.Container {
 
 	// Repository list scroll
 	repoScroll := container.NewVScroll(f.fileOpsRepoContainer)
+
+	// Provider indicator section
+	providerLabel := widget.NewLabel("Active Provider:")
+	providerLabel.TextStyle = fyne.TextStyle{Bold: true}
+	providerSection := container.New(layout.NewHBoxLayout(),
+		providerLabel,
+		f.fileOpsProviderRadio,
+		layout.NewSpacer(),
+	)
 
 	// Create prominent load button section
 	loadSection := container.New(layout.NewHBoxLayout(),
@@ -218,6 +247,7 @@ func (f *FyneApp) createFileOperationsRightColumn() *fyne.Container {
 
 	// Combine buttons into one section like String Replacement tab
 	repoButtons := container.New(layout.NewVBoxLayout(),
+		providerSection,
 		loadSection,
 		f.fileOpsFilterEntry,
 		selectionButtons,
