@@ -2210,20 +2210,22 @@ func (f *FyneApp) createExpandableFileEntry(fileName string, diffContent string)
 func (f *FyneApp) openDiffWindow(fileName, diffContent string) {
 	// Create new window for the file diff
 	diffWindow := f.app.NewWindow(fmt.Sprintf("Diff: %s", fileName))
-	diffWindow.Resize(fyne.NewSize(1400, 800))
-	diffWindow.CenterOnScreen()
 
 	// Parse the diff and extract only the changed hunks
 	formattedDiff := f.formatDiffHunks(diffContent)
 
-	// Use colored RichText for better syntax highlighting
-	diffText := f.createColoredDiffText(formattedDiff)
-	diffText.Wrapping = fyne.TextWrapWord
+	// Calculate optimal window size based on content
+	optimalSize := f.calculateOptimalWindowSize(formattedDiff)
+	diffWindow.Resize(optimalSize)
+	diffWindow.CenterOnScreen()
+
+	// Use monospace label for compact diff display
+	diffText := f.createMonospaceDiffText(formattedDiff)
 
 	diffScroll := container.NewScroll(diffText)
 
-	// Add some padding around the content
-	content := container.NewPadded(diffScroll)
+	// Use minimal padding to keep diff compact
+	content := diffScroll
 
 	// Close button at the bottom
 	closeBtn := widget.NewButton("Close", func() {
@@ -2270,7 +2272,6 @@ func (f *FyneApp) aggressiveFilterDiff(diffContent string) string {
 	if len(lines) > maxLines {
 		var result []string
 		result = append(result, lines[:maxLines]...)
-		result = append(result, "")
 		result = append(result, fmt.Sprintf("... [Truncated - showing first %d lines of %d total] ...", maxLines, len(lines)))
 		return strings.Join(result, "\n")
 	}
@@ -2294,7 +2295,7 @@ func (f *FyneApp) extractEssentialDiff(diffContent string) string {
 			// If we have a previous hunk, add it to result
 			if len(currentHunk) > 0 {
 				result.WriteString(f.formatHunkLines(currentHunk, hunkLineNum))
-				result.WriteString("\n" + strings.Repeat("─", 40) + "\n\n")
+				result.WriteString("\n" + strings.Repeat("─", 40) + "\n")
 			}
 
 			// Start new hunk
@@ -2313,7 +2314,7 @@ func (f *FyneApp) extractEssentialDiff(diffContent string) string {
 			inHunk = false
 			if len(currentHunk) > 0 {
 				result.WriteString(f.formatHunkLines(currentHunk, hunkLineNum))
-				result.WriteString("\n" + strings.Repeat("─", 40) + "\n\n")
+				result.WriteString("\n" + strings.Repeat("─", 40) + "\n")
 				currentHunk = []string{}
 			}
 		}
@@ -2390,63 +2391,82 @@ func (f *FyneApp) addLineNumbersToRawDiff(diffContent string) string {
 	return strings.Join(numberedLines, "\n")
 }
 
-func (f *FyneApp) createColoredDiffText(diffContent string) *widget.RichText {
-	richText := widget.NewRichText()
-	richText.Wrapping = fyne.TextWrapWord
+func (f *FyneApp) createMonospaceDiffText(diffContent string) *widget.Label {
+	// Create label with monospace font for compact display
+	diffLabel := widget.NewLabel(diffContent)
 
+	// Set monospace font for better diff alignment
+	diffLabel.TextStyle = fyne.TextStyle{Monospace: true}
+
+	// No text wrapping for diffs to preserve formatting
+	diffLabel.Wrapping = fyne.TextWrapOff
+
+	// Set alignment to start for better diff readability
+	diffLabel.Alignment = fyne.TextAlignLeading
+
+	return diffLabel
+}
+
+// calculateOptimalWindowSize calculates the optimal window size based on diff content
+func (f *FyneApp) calculateOptimalWindowSize(diffContent string) fyne.Size {
 	lines := strings.Split(diffContent, "\n")
 
-	for _, line := range lines {
-		var segment *widget.TextSegment
+	// Constants for sizing calculations
+	const (
+		charWidth    = 8   // Average character width in pixels for monospace
+		lineHeight   = 18  // Line height in pixels
+		buttonHeight = 40  // Height for close button
+		padding      = 40  // General padding
+		minWidth     = 400 // Minimum window width
+		minHeight    = 200 // Minimum window height
+		maxLines     = 40  // Maximum lines before scrolling
+		maxChars     = 120 // Maximum characters before horizontal scrolling
+	)
 
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			// Addition line - green
-			segment = &widget.TextSegment{
-				Text: line + "\n",
-				Style: widget.RichTextStyle{
-					ColorName: theme.ColorNameSuccess,
-				},
-			}
-		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			// Deletion line - red
-			segment = &widget.TextSegment{
-				Text: line + "\n",
-				Style: widget.RichTextStyle{
-					ColorName: theme.ColorNameError,
-				},
-			}
-		} else if strings.HasPrefix(line, "@@") {
-			// Hunk header - blue
-			segment = &widget.TextSegment{
-				Text: line + "\n",
-				Style: widget.RichTextStyle{
-					ColorName: theme.ColorNamePrimary,
-					TextStyle: fyne.TextStyle{Bold: true},
-				},
-			}
-		} else if strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") {
-			// File headers - gray
-			segment = &widget.TextSegment{
-				Text: line + "\n",
-				Style: widget.RichTextStyle{
-					ColorName: theme.ColorNameDisabled,
-					TextStyle: fyne.TextStyle{Italic: true},
-				},
-			}
-		} else {
-			// Context line - normal
-			segment = &widget.TextSegment{
-				Text: line + "\n",
-				Style: widget.RichTextStyle{
-					ColorName: theme.ColorNameForeground,
-				},
-			}
-		}
-
-		richText.Segments = append(richText.Segments, segment)
+	// Calculate number of lines (limited by maxLines)
+	numLines := len(lines)
+	if numLines > maxLines {
+		numLines = maxLines
 	}
 
-	return richText
+	// Find the longest line length
+	maxLineLength := 0
+	for _, line := range lines {
+		if len(line) > maxLineLength {
+			maxLineLength = len(line)
+		}
+	}
+
+	// Limit line length for window width calculation
+	if maxLineLength > maxChars {
+		maxLineLength = maxChars
+	}
+
+	// Calculate optimal dimensions
+	optimalWidth := maxLineLength*charWidth + padding
+	optimalHeight := numLines*lineHeight + buttonHeight + padding
+
+	// Apply minimum constraints
+	if optimalWidth < minWidth {
+		optimalWidth = minWidth
+	}
+	if optimalHeight < minHeight {
+		optimalHeight = minHeight
+	}
+
+	// Get screen size to limit maximum window size
+	screen := fyne.CurrentApp().Driver().AllWindows()[0].Canvas().Size()
+	maxWidth := int(float64(screen.Width) * 0.9)   // 90% of screen width
+	maxHeight := int(float64(screen.Height) * 0.8) // 80% of screen height
+
+	if optimalWidth > maxWidth {
+		optimalWidth = maxWidth
+	}
+	if optimalHeight > maxHeight {
+		optimalHeight = maxHeight
+	}
+
+	return fyne.NewSize(float32(optimalWidth), float32(optimalHeight))
 }
 
 func (f *FyneApp) applyChanges(rules []ReplacementRule, repos []Repository, options ProcessingOptions) {
