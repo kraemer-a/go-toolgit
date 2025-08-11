@@ -1164,6 +1164,83 @@ func (s *Service) generateDiffFromFileChange(fileChange *processor.FileChange) s
 		return ""
 	}
 
+	// Read the actual file to get context lines
+	fileContent, err := os.ReadFile(fileChange.FilePath)
+	if err != nil {
+		// Fallback to simple diff without context
+		return s.generateSimpleDiff(fileChange)
+	}
+
+	lines := strings.Split(string(fileContent), "\n")
+	var diff strings.Builder
+
+	// Write file header
+	diff.WriteString(fmt.Sprintf("--- a/%s\n", fileChange.FilePath))
+	diff.WriteString(fmt.Sprintf("+++ b/%s\n", fileChange.FilePath))
+
+	// Group changes by line number and generate proper hunks with context
+	lineGroups := s.groupChangesByLine(fileChange.StringChanges)
+
+	for _, group := range lineGroups {
+		// Calculate context range (3 lines before and after)
+		startLine := group[0].LineNumber
+		endLine := group[len(group)-1].LineNumber
+
+		contextStart := startLine - 3
+		if contextStart < 1 {
+			contextStart = 1
+		}
+
+		contextEnd := endLine + 3
+		if contextEnd > len(lines) {
+			contextEnd = len(lines)
+		}
+
+		// Calculate hunk header values
+		oldStart := contextStart
+		oldCount := contextEnd - contextStart + 1
+		newStart := contextStart
+		newCount := oldCount // Same count since we're doing line replacements
+
+		diff.WriteString(fmt.Sprintf("@@ -%d,%d +%d,%d @@\n",
+			oldStart, oldCount, newStart, newCount))
+
+		// Create a map of line numbers that have changes
+		changeMap := make(map[int]processor.StringChange)
+		for _, change := range group {
+			changeMap[change.LineNumber] = change
+		}
+
+		// Output context and changes
+		for lineNum := contextStart; lineNum <= contextEnd; lineNum++ {
+			if lineNum > len(lines) {
+				break
+			}
+
+			lineIndex := lineNum - 1 // Convert to 0-based index
+			if lineIndex < 0 || lineIndex >= len(lines) {
+				continue
+			}
+
+			line := lines[lineIndex]
+
+			if change, hasChange := changeMap[lineNum]; hasChange {
+				// This line has a change - show old and new versions
+				diff.WriteString(fmt.Sprintf("-%s\n", line))
+				modifiedLine := strings.Replace(line, change.Original, change.Replacement, -1)
+				diff.WriteString(fmt.Sprintf("+%s\n", modifiedLine))
+			} else {
+				// This is a context line - show unchanged
+				diff.WriteString(fmt.Sprintf(" %s\n", line))
+			}
+		}
+	}
+
+	return diff.String()
+}
+
+// generateSimpleDiff generates a simple diff without file context (fallback)
+func (s *Service) generateSimpleDiff(fileChange *processor.FileChange) string {
 	var diff strings.Builder
 
 	// Write file header
@@ -1192,7 +1269,6 @@ func (s *Service) generateDiffFromFileChange(fileChange *processor.FileChange) s
 				modifiedLine := strings.Replace(change.Context, change.Original, change.Replacement, -1)
 				diff.WriteString(fmt.Sprintf("+%s\n", modifiedLine))
 			}
-			// Skip changes without context - we don't want to show partial strings
 		}
 	}
 
