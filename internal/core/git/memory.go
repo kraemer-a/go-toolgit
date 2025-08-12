@@ -338,8 +338,8 @@ func (mr *MemoryRepository) ListFiles() ([]FileInfo, error) {
 	var files []FileInfo
 
 	err := walkFiles(mr.fs, "/", func(path string, info os.FileInfo) error {
-		// Skip directories and hidden files
-		if info.IsDir() || strings.HasPrefix(filepath.Base(path), ".") {
+		// Skip directories and files in .git directory
+		if info.IsDir() || strings.Contains(path, "/.git/") {
 			return nil
 		}
 
@@ -946,8 +946,8 @@ func walkFiles(fs billy.Filesystem, root string, fn func(path string, info os.Fi
 		path := filepath.Join(root, file.Name())
 
 		if file.IsDir() {
-			// Skip .git directory and other hidden directories
-			if strings.HasPrefix(file.Name(), ".") {
+			// Skip only .git directory
+			if file.Name() == ".git" {
 				continue
 			}
 			err = walkFiles(fs, path, fn)
