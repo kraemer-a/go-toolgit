@@ -340,8 +340,11 @@ func (f *FyneApp) handleFileOpsLoadRepositories() {
 
 		f.repositories = repos
 		f.fileOpsFilteredRepos = repos
-		f.displayFileOpsRepositories()
-		f.setStatusSuccess(fmt.Sprintf("Loaded %d repositories", len(repos)))
+
+		fyne.Do(func() {
+			f.displayFileOpsRepositories()
+			f.setStatusSuccess(fmt.Sprintf("Loaded %d repositories", len(repos)))
+		})
 	}()
 }
 
@@ -520,7 +523,9 @@ func (f *FyneApp) handleFileOperationsDryRun() {
 			return
 		}
 
-		f.showFileOperationsResults(result, true)
+		fyne.DoAndWait(func() {
+			f.showFileOperationsResults(result, true)
+		})
 	}()
 }
 
@@ -562,7 +567,9 @@ func (f *FyneApp) handleFileOperationsProcess() {
 			return
 		}
 
-		f.showFileOperationsResults(result, false)
+		fyne.DoAndWait(func() {
+			f.showFileOperationsResults(result, false)
+		})
 	}()
 }
 
