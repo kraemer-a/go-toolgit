@@ -569,7 +569,7 @@ func (f *FyneApp) handleFileOperationsProcess() {
 // getSelectedFileOpsRepositories returns the selected repositories
 func (f *FyneApp) getSelectedFileOpsRepositories() []Repository {
 	var selected []Repository
-	for _, repo := range f.repositories {
+	for _, repo := range f.fileOpsFilteredRepos {
 		if repo.Selected {
 			selected = append(selected, repo)
 		}
