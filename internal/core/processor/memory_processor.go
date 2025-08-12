@@ -169,7 +169,14 @@ func (p *MemoryProcessor) filterFiles(files []git.FileInfo) []git.FileInfo {
 	for _, file := range files {
 		// Check exclude patterns first
 		excluded := false
+		fileName := filepath.Base(file.Path)
 		for _, pattern := range p.engine.excludePatterns {
+			// Check against filename (for patterns like *.json)
+			if matched, _ := filepath.Match(pattern, fileName); matched {
+				excluded = true
+				break
+			}
+			// Check against full path (for patterns with directories)
 			if matched, _ := filepath.Match(pattern, file.Path); matched {
 				excluded = true
 				break
