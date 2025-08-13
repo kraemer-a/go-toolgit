@@ -1436,10 +1436,15 @@ func (f *FyneApp) setStatus(status string) {
 	f.logger.Info("Status update", "status", status)
 	truncatedStatus := f.truncateText(status, 100) // Truncate at ~100 characters
 	fyne.Do(func() {
-		f.statusLabel.SetText(truncatedStatus)
-		// Reset to default styling
-		f.statusLabel.Importance = widget.MediumImportance
-		f.statusIcon.SetResource(theme.InfoIcon())
+		// Check if statusLabel is initialized before using it
+		if f.statusLabel != nil {
+			f.statusLabel.SetText(truncatedStatus)
+			// Reset to default styling
+			f.statusLabel.Importance = widget.MediumImportance
+		}
+		if f.statusIcon != nil {
+			f.statusIcon.SetResource(theme.InfoIcon())
+		}
 	})
 }
 
@@ -1464,11 +1469,18 @@ func (f *FyneApp) setStatusSuccess(status string) {
 	f.logger.Info("Status update (success)", "status", status)
 	truncatedStatus := f.truncateText(status, 100) // Truncate at ~100 characters
 	fyne.Do(func() {
-		f.statusLabel.SetText(truncatedStatus)
-		f.statusIcon.SetResource(theme.ConfirmIcon())
-		f.statusLabel.Importance = widget.SuccessImportance
+		// Check if statusLabel is initialized before using it
+		if f.statusLabel != nil {
+			f.statusLabel.SetText(truncatedStatus)
+			f.statusLabel.Importance = widget.SuccessImportance
+		}
+		if f.statusIcon != nil {
+			f.statusIcon.SetResource(theme.ConfirmIcon())
+		}
 		// Show toast notification
-		ShowToast(f.window, status, "success")
+		if f.window != nil {
+			ShowToast(f.window, status, "success")
+		}
 	})
 }
 
@@ -1477,11 +1489,18 @@ func (f *FyneApp) setStatusError(status string) {
 	f.logger.Info("Status update (error)", "status", status)
 	truncatedStatus := f.truncateText(status, 100) // Truncate at ~100 characters
 	fyne.Do(func() {
-		f.statusLabel.SetText(truncatedStatus)
-		f.statusIcon.SetResource(theme.ErrorIcon())
-		f.statusLabel.Importance = widget.DangerImportance
+		// Check if statusLabel is initialized before using it
+		if f.statusLabel != nil {
+			f.statusLabel.SetText(truncatedStatus)
+			f.statusLabel.Importance = widget.DangerImportance
+		}
+		if f.statusIcon != nil {
+			f.statusIcon.SetResource(theme.ErrorIcon())
+		}
 		// Show toast notification
-		ShowToast(f.window, status, "error")
+		if f.window != nil {
+			ShowToast(f.window, status, "error")
+		}
 	})
 }
 
