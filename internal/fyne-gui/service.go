@@ -168,10 +168,65 @@ func NewService(cfg *config.Config, logger *utils.Logger) *Service {
 	}
 }
 
-// SetActiveProvider updates the active provider for operations
-func (s *Service) SetActiveProvider(provider string) {
+// SetActiveProvider updates the active provider for operations and reinitializes clients
+func (s *Service) SetActiveProvider(provider string) error {
 	s.logger.Info("Setting active provider", "provider", provider)
 	s.config.Provider = provider
+
+	// Reinitialize the appropriate client based on the selected provider
+	if provider == "github" {
+		// Check if GitHub credentials exist
+		if s.config.GitHub.BaseURL == "" || s.config.GitHub.Token == "" {
+			return fmt.Errorf("GitHub credentials not configured. Please validate configuration first")
+		}
+
+		// Create GitHub config
+		githubConfig := &github.Config{
+			BaseURL:      s.config.GitHub.BaseURL,
+			Token:        s.config.GitHub.Token,
+			Timeout:      s.config.GitHub.Timeout,
+			MaxRetries:   s.config.GitHub.MaxRetries,
+			WaitForReset: s.config.GitHub.WaitForRateLimit,
+		}
+
+		// Initialize GitHub client
+		var err error
+		s.githubClient, err = github.NewClient(githubConfig)
+		if err != nil {
+			return fmt.Errorf("failed to initialize GitHub client: %w", err)
+		}
+
+		// Initialize Git operations with GitHub client
+		s.gitOps = git.NewMemoryOperations(s.config.GitHub.Token)
+
+	} else if provider == "bitbucket" {
+		// Check if Bitbucket credentials exist
+		if s.config.Bitbucket.BaseURL == "" || s.config.Bitbucket.Username == "" ||
+			s.config.Bitbucket.Password == "" || s.config.Bitbucket.Project == "" {
+			return fmt.Errorf("Bitbucket credentials not configured. Please validate configuration first")
+		}
+
+		// Create Bitbucket config
+		bitbucketConfig := &bitbucket.Config{
+			BaseURL:    s.config.Bitbucket.BaseURL,
+			Username:   s.config.Bitbucket.Username,
+			Password:   s.config.Bitbucket.Password,
+			Timeout:    s.config.Bitbucket.Timeout,
+			MaxRetries: s.config.Bitbucket.MaxRetries,
+		}
+
+		// Initialize Bitbucket client
+		var err error
+		s.bitbucketClient, err = bitbucket.NewClient(bitbucketConfig)
+		if err != nil {
+			return fmt.Errorf("failed to initialize Bitbucket client: %w", err)
+		}
+
+		// Initialize Git operations with Bitbucket credentials
+		s.gitOps = git.NewMemoryOperations(s.config.Bitbucket.Password)
+	}
+
+	return nil
 }
 
 // SaveConfig saves the current configuration to disk with automatic encryption

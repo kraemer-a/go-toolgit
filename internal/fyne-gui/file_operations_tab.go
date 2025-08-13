@@ -171,11 +171,19 @@ func (f *FyneApp) createFileOperationsRightColumn() *fyne.Container {
 	// Provider selection radio (active selection)
 	f.fileOpsProviderRadio = widget.NewRadioGroup([]string{"GitHub", "Bitbucket"}, func(selected string) {
 		// Update the service to use the selected provider
+		var err error
 		if selected == "GitHub" {
-			f.service.SetActiveProvider("github")
+			err = f.service.SetActiveProvider("github")
 		} else if selected == "Bitbucket" {
-			f.service.SetActiveProvider("bitbucket")
+			err = f.service.SetActiveProvider("bitbucket")
 		}
+
+		// If there was an error, show it and don't update other tabs
+		if err != nil {
+			f.setStatusError(fmt.Sprintf("Failed to switch provider: %v", err))
+			return
+		}
+
 		// Update the main provider selection in Configuration tab
 		if f.providerSelect != nil {
 			if selected == "GitHub" {
